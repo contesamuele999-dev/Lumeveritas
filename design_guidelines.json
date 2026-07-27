@@ -1,0 +1,107 @@
+{
+  "project_context": "News/AI Hybrid Web App prioritizing truth, deep analysis, and extreme accessibility for non-technical users. Interface in IT/EN.",
+  "theme_name": "Editorial Truth (Swiss Minimalism + High-craft Editorial)",
+  "global_rules": {
+    "theme_mode": "System default with user toggle (Light/Dark). Light mode resembles a high-end broadsheet paper. Dark mode resembles a digital intelligence archive.",
+    "border_strategy": "Cardless layout. Use 1px solid borders (`border-border`) to separate content like newspaper columns. NO floating cards with drop shadows.",
+    "accessibility_focus": "Extreme. Minimum 48x48px tap targets. Large default fonts. High contrast. Zero confusing icons without text labels."
+  },
+  "typography": {
+    "headings": {
+      "family": "Newsreader, serif",
+      "usage": "Article headlines, page titles, and AI analysis titles. Evokes trust, objectivity, and classic journalism.",
+      "styles": "tracking-tight, highly legible."
+    },
+    "body": {
+      "family": "Manrope, sans-serif",
+      "usage": "UI elements, topic tags, meta information, and AI query input. Very friendly, clear, and legible."
+    },
+    "hierarchy": {
+      "h1": "text-4xl md:text-5xl font-serif leading-none tracking-tight",
+      "h2": "text-2xl md:text-3xl font-serif leading-tight",
+      "body": "text-lg md:text-xl font-sans leading-relaxed text-foreground/90",
+      "meta": "text-sm font-sans uppercase tracking-[0.1em] text-muted-foreground"
+    }
+  },
+  "colors": {
+    "light": {
+      "background": "#F9F9F6",
+      "foreground": "#111111",
+      "muted": "#EBEBE5",
+      "muted_foreground": "#666666",
+      "accent_red": "#D9381E",
+      "border": "#E2E2D9",
+      "surface": "#FFFFFF"
+    },
+    "dark": {
+      "background": "#0F1115",
+      "foreground": "#F4F4F0",
+      "muted": "#1F2229",
+      "muted_foreground": "#999999",
+      "accent_red": "#FF4B33",
+      "border": "#2A2C33",
+      "surface": "#16191F"
+    },
+    "usage_rules": "NO gradients. Use solid colors. The 'accent_red' is used EXCLUSIVELY for the 'Approfondisci' (Deep Dive) action, breaking news, or active selection states to immediately guide non-tech users."
+  },
+  "layouts": {
+    "app_shell": "Top Navigation bar featuring an extra-large, prominent AI Query Input (looks like a search bar: 'Chiedi all\\'AI un argomento...'). Left sidebar (desktop) or bottom nav (mobile) for Categories, Saved, Profile.",
+    "news_feed": "The 'Editorial Grid'. Not a boring list. The top news item spans full width (col-span-full) with a huge image. Followed by a masonry or 2/3-column grid. Items separated by sharp 1px borders.",
+    "spacing": "Highly generous. Use `p-6` or `p-8` inside article containers to give text room to breathe."
+  },
+  "components": {
+    "AI_Query_Bar": {
+      "design": "Large pill-shaped input field in the header. Must look instantly usable. Icon on the left (Search), large text placeholder. Prominent 'Invia' (Send) button.",
+      "interaction": "Focusing on the bar dims the background slightly to emphasize the search/ask functionality."
+    },
+    "News_Item": {
+      "design": "Flat, cardless. Image has `rounded-sm` or no rounding. Meta data (Date, Category) in uppercase above the title. Large serif title. Short sans-serif excerpt.",
+      "actions": "Primary button: 'Approfondisci' (Deep Dive) in Accent Red. Secondary action: 'Salva' (Save)."
+    },
+    "Deep_Dive_Panel": {
+      "design": "Shadcn Sheet (Side drawer). When 'Approfondisci' is clicked, it slides in. Contains AI-generated structured points: 'I veri motivi' (Real reasons), 'Dati' (Data), 'Contesto' (Context).",
+      "style": "Structured like an executive summary. Large text, heavily scannable by older/non-tech users."
+    },
+    "Topic_Selector": {
+      "design": "Large, highly visible tappable pill buttons. When selected, they invert (dark background, light text) indicating active state."
+    }
+  },
+  "motion_and_interactions": {
+    "hover_states": "Text links get a 1px underline. Images zoom very slightly (scale 1.02) inside a hidden overflow container.",
+    "transitions": "Keep transitions fast (150ms). Non-tech users prefer snappy, predictable interfaces over sluggish animations."
+  },
+  "accessibility": {
+    "tap_targets": "Minimum 48x48px for ALL clickable elements.",
+    "contrast": "Strict APCA/WCAG AA compliance. Default text must be large (base text-lg).",
+    "language": "UI must support simple IT/EN toggling. Interface labels default to Italian and must be literal (e.g., 'Esci' instead of just a door icon)."
+  },
+  "media": {
+    "image_style": "Editorial, objective, wide shots. Avoid generic stock smiles. Use architectural, data, or environmental imagery for categories.",
+    "image_urls": [
+      { "url": "https://images.unsplash.com/photo-1660890694842-0163c693099f", "category": "general_news_placeholder", "description": "Minimalist reading" },
+      { "url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71", "category": "markets_and_data", "description": "Abstract charts on screen" },
+      { "url": "https://images.unsplash.com/photo-1522743791393-522312deeebf", "category": "politics_and_laws", "description": "Concrete modern architecture" },
+      { "url": "https://images.unsplash.com/photo-1779092166793-ffaba541da95", "category": "science_and_environment", "description": "Vast natural lake and mountains" }
+    ]
+  },
+  "instructions_to_main_agent": {
+    "critical_rules": [
+      "PROJECT USES .JS and .JSX EXTENSIONS, NOT .TSX. Ensure all generated components and configurations are JavaScript compatible.",
+      "DO NOT use generic purple AI gradients. This is a serious news platform, not a tech startup.",
+      "DO NOT use floating cards with soft shadows. Use a 'cardless' layout with 1px solid borders (`border-border`) for separation.",
+      "Always include `data-testid` on interactive elements (e.g., `data-testid='approfondisci-button'`).",
+      "Ensure text sizes are larger than typical defaults for extreme readability (base should be `text-lg`).",
+      "The 'Approfondisci' feature must open an AI analysis view (Sheet or Dialog) that breaks down the real reasons and data clearly."
+    ],
+    "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+      "You tend to converge toward generic, 'on distribution' outputs. Make creative, distinctive frontends that surprise and delight.",
+      "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+      "Don't make generic centered layouts. Use asymmetrical or strict column-based grids.",
+      "Create depth through layered design elements with z-index hierarchy and crisp 1px borders.",
+      "You MUST NOT apply universal transition (`transition: all`). Add transitions for specific interactive elements only.",
+      "You MUST NOT center align the app container. Text must flow naturally left-aligned for reading.",
+      "NEVER use AI assistant Emoji characters (🤖🧠💡). Use sleek icons from `lucide-react` instead.",
+      "Use sonner for toasts, located in `/app/frontend/src/components/ui/sonner.jsx` or `.js`."
+    ]
+  }
+}
