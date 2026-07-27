@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import ClickableText from "@/components/ClickableText";
+import AudioButton from "@/components/AudioButton";
+import ShareButton from "@/components/ShareButton";
 import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
@@ -46,6 +48,12 @@ export default function DeepDiveSheet({ item, open, onOpenChange }) {
           <div className="mt-4 text-base md:text-lg text-foreground/85 leading-relaxed">
             <ClickableText text={data?.summary} />
           </div>
+          {data?.id && (
+            <div className="mt-5 flex flex-wrap gap-3">
+              <AudioButton briefingId={data.id} testid={`deep-audio-${data.id}`} />
+              <ShareButton briefingId={data.id} testid={`deep-share-${data.id}`} />
+            </div>
+          )}
         </div>
 
         {loading && (

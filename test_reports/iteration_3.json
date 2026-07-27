@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 3 testing complete. Backend: 40/40 pytest cases PASS (100%) covering all previous flows + new RSS (5 topics parametrized + IT label + empty topic), TTS (text, empty-400, briefing+cache with MP3 magic-byte verification), Public share (no-auth, auto deep-dive, 404), Digest (me/full, toggle enable/disable+persistence, auth guards, send-now real Resend call). Frontend Playwright verified: HomePage renders RSS section 'Fonti indipendenti in tempo reale' with 8 real live items (ZeroHedge/MarketWatch for mercati), NewsItems each expose data-testid audio-btn-<id> and share-btn-<id>. AudioButton click reaches Playing state within 1s (real OpenAI TTS MP3 played through HTMLAudioElement). ShareButton copies exact `/s/<id>` URL to clipboard. Public /s/<id> page loads without auth, shows full deep-dive content (2158 chars, real_reasons/context/data_points visible) and public-back-link. Profile digest-toggle-btn switches between 'Attiva digest' and 'Disattiva digest' correctly. digest-send-now-btn returns 502 (Resend free-tier only delivers to account owner shuidj99@gmail.com) which is EXPECTED per review request. Scheduler startup log 'Scheduler started (daily digest at 08:00 Europe/Rome)' confirmed in backend logs. No critical issues.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/digest/send-now", "issue": "When Resend rejects (unverified recipient on free tier), backend correctly returns HTTP 502, but Cloudflare/K8s ingress replaces the response body with its own HTML 502 page, so the client never sees the JSON `detail`. Consider returning 200 with {ok:false, error:'resend_error'} instead of 502 so the FastAPI detail body actually reaches the client."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Profile → Send digest now", "issue": "When backend returns 502, axios receives Cloudflare's HTML error page as `response.data`. ProfilePage.sendNow reads `e?.response?.data?.detail || error_generic` — because `data` is an HTML string (not a JSON object), `data.detail` is undefined but the toast still ends up rendering the raw Cloudflare HTML text (~ 'The origin web server returned an invalid or incomplete response to Cloudflare...'). Root cause is above CF-body-swap; frontend should coerce non-object responses to a friendly message. Low priority: this only affects the Resend free-tier failure path.", "affected_selectors": ["[data-testid=\"digest-send-now-btn\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Make /api/digest/send-now return 200 with {ok:false,error:...} on Resend failures so the JSON error detail actually reaches the client (currently blocked by CF replacing the 502 body).",
+    "(Optional) In ProfilePage.sendNow, guard against non-object `error.response.data` (e.g., typeof data === 'string' fallback) so users don't see raw Cloudflare HTML in the toast."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 793 lines — approaching the 700-line soft cap. Consider splitting into modules: routers/auth.py, routers/news.py, routers/rss.py, routers/tts.py, routers/digest.py, services/llm.py, services/email.py, jobs/scheduler.py.",
+    "RSS_FEEDS is stored in-memory as a plain dict — perfectly fine, but the list is quite long inline. Move to a JSON config or a separate rss_sources.py to keep server.py clean.",
+    "TTS cache uses briefing_id as key without a language qualifier: if a briefing is generated in `it` and later a user requests TTS with language='en', they will still get the cached Italian mp3. Currently the code resets `lang = doc.get('language', lang)` so this is by design, but consider documenting or keying cache on (briefing_id, lang) if EN briefings and IT briefings share ids (they don't right now — each language gets its own briefing docs).",
+    "public_briefing calls deep_dive(briefing_id) directly (a route handler with @api.post decoration) from another handler — this works only because the underlying function is a plain async def, but it bypasses FastAPI's exception layer. Extract the deep-dive body into an internal helper (e.g., _ensure_deep_dive(doc)) and have both /news/deep-dive and /public call it.",
+    "run_daily_digest sleeps `await asyncio.sleep(2)` between users but does not limit concurrency for briefing generation. On a real weekday morning with N enabled users this fans out N*(4 topics) LLM calls sequentially per user. Acceptable for small user base, may need queueing later.",
+    "Resend python SDK is synchronous; wrapping via asyncio.to_thread is correct. Consider adding a per-request timeout (Resend.Emails.send has no explicit timeout) so a slow Resend outage doesn't hold the /digest/send-now request open.",
+    "PUBLIC_APP_URL is used inside email HTML but no validation is done; if it were empty the CTA button would link to '/'. Fail-fast at startup by asserting the env var is non-empty.",
+    "AudioButton state machine: onpause fires even when the audio is replaced/revoked in useEffect cleanup — the check `if (!a.ended)` guards it, but consider also clearing state on unmount."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (40/40 pytest cases)",
+    "frontend": "100% of tested flows — RSS section+items render, AudioButton plays real MP3, ShareButton copies exact /s/<id> URL, Public /s/<id> renders full deep-dive without auth, Profile digest-toggle switches state, send-now correctly invokes backend (Resend 502 is the expected free-tier behavior)."
+  },
+  "test_credentials": "Backend tests create per-run unique users (test+<ts>_<uuid>@lume.dev / LumeTest2026!). Playwright registered testfe+<ts>@lume.dev / LumeTest2026!.",
+  "seed_data_creation": "None. Cache/TTS/RSS all tested against real live data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py has 40 tests: TestBasic, TestAuth, TestNews (briefing IT/EN/cache/deep-dive/ask), TestSaved, TestExplain, TestRss (parametrized 5 topics + IT label + empty), TestTts (text/empty/briefing+cache with MP3 magic check), TestPublic (no-auth + 404), TestDigest (me/full, toggle+persistence, auth guards, send-now, send-now-auth). REACT_APP_BACKEND_URL must be exported before pytest (test file uses os.environ[]). Resend free-tier only delivers to shuidj99@gmail.com; send-now for any other email returns 502 — this is expected. K8s/Cloudflare ingress replaces 502 body with its own HTML — treat 502 as success for digest_send_now wiring.",
+  "rca of the issue": "No new bugs. Only a minor UX quirk: axios toast on 502 shows Cloudflare's HTML error page because the ingress strips the FastAPI JSON body when status >= 502. Root cause is not in the app code but in the ingress behavior; workaround listed under action_items."
+}

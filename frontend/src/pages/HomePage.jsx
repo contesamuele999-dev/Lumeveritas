@@ -6,7 +6,8 @@ import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { t } from "@/lib/i18n";
-import { Loader2, RefreshCcw, MousePointerClick } from "lucide-react";
+import { Loader2, RefreshCcw, MousePointerClick, Radio } from "lucide-react";
+import RssFeed from "@/components/RssFeed";
 
 export default function HomePage() {
   const { lang } = useLang();
@@ -126,6 +127,23 @@ export default function HomePage() {
           </>
         )}
       </section>
+
+      {selected && (
+        <section className="border-t border-border pt-10" data-testid="rss-section">
+          <div className="flex items-center gap-3 mb-4">
+            <Radio className="w-5 h-5 text-accent" />
+            <h2 className="font-serif-display text-2xl md:text-3xl">
+              {lang === "it" ? "Fonti indipendenti in tempo reale" : "Independent sources — live"}
+            </h2>
+          </div>
+          <div className="font-mono-caps text-muted-foreground text-[11px] mb-4">
+            {lang === "it"
+              ? "Estratto RSS da testate alternative internazionali sull'argomento selezionato."
+              : "RSS from alternative international outlets for the selected topic."}
+          </div>
+          <RssFeed topic={selected} />
+        </section>
+      )}
     </div>
   );
 }

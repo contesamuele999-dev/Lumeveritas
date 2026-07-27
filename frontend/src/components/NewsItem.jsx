@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import DeepDiveSheet from "@/components/DeepDiveSheet";
 import ClickableText from "@/components/ClickableText";
+import AudioButton from "@/components/AudioButton";
+import ShareButton from "@/components/ShareButton";
 
 export default function NewsItem({ item, featured = false, onSaveToggle, initiallySaved = false }) {
   const { lang } = useLang();
@@ -81,6 +83,8 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
           {saved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
           {saved ? t(lang, "unsave") : t(lang, "save")}
         </button>
+        <AudioButton briefingId={item.id} testid={`audio-btn-${item.id}`} />
+        <ShareButton briefingId={item.id} testid={`share-btn-${item.id}`} />
       </div>
 
       <DeepDiveSheet item={item} open={openDeep} onOpenChange={setOpenDeep} />

@@ -9,6 +9,7 @@ import RegisterPage from "@/pages/RegisterPage";
 import SavedPage from "@/pages/SavedPage";
 import AskPage from "@/pages/AskPage";
 import ProfilePage from "@/pages/ProfilePage";
+import PublicBriefingPage from "@/pages/PublicBriefingPage";
 import AppShell from "@/components/AppShell";
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/s/:id" element={<PublicBriefingPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

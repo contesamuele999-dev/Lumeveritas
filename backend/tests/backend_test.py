@@ -284,3 +284,152 @@ class TestExplain:
         long_word = "a" * 121
         r = client.post(f"{API}/explain", json={"word": long_word, "language": "it"}, timeout=DEFAULT_TIMEOUT)
         assert r.status_code == 400, f"expected 400 for word > 120 chars, got {r.status_code}: {r.text}"
+
+
+# ---------------- RSS (NEW iteration 3) ----------------
+class TestRss:
+    """GET /api/rss/feed?topic=<label|key>"""
+
+    @pytest.mark.parametrize("topic", ["scienza", "mercati", "tecnologia", "geopolitica", "cripto"])
+    def test_rss_topics_return_items(self, client, topic):
+        r = client.get(f"{API}/rss/feed?topic={topic}&limit=8", timeout=30)
+        assert r.status_code == 200, f"{topic}: {r.status_code} {r.text[:200]}"
+        d = r.json()
+        assert d["topic"] == topic
+        items = d["items"]
+        assert isinstance(items, list)
+        # We expect >= 1 real item from at least one working feed
+        assert len(items) >= 1, f"expected >=1 RSS item for {topic}, got 0"
+        first = items[0]
+        for k in ("title", "link", "summary", "source", "published"):
+            assert k in first, f"missing field {k} in RSS item: {first}"
+        assert isinstance(first["title"], str) and len(first["title"]) > 3
+        assert first["link"].startswith("http"), f"bad link: {first['link']!r}"
+
+    def test_rss_by_italian_label(self, client):
+        # Client sends Italian label like "Scienza & Scoperte" or exact label from topics list
+        r = client.get(f"{API}/rss/feed?topic=Tecnologia&limit=5", timeout=30)
+        assert r.status_code == 200
+        assert len(r.json().get("items", [])) >= 1
+
+    def test_rss_nonexistent_topic_empty(self, client):
+        r = client.get(f"{API}/rss/feed?topic=nonexistent-xyz-topic", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        assert r.json()["items"] == []
+
+
+# ---------------- TTS (NEW iteration 3) ----------------
+class TestTts:
+    """POST /api/tts"""
+
+    def test_tts_from_text(self, client):
+        r = client.post(f"{API}/tts", json={"text": "Ciao, questa è una prova audio.", "language": "it"}, timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"tts text failed: {r.status_code} {r.text[:300]}"
+        d = r.json()
+        assert d.get("mime") == "audio/mpeg"
+        b64 = d.get("audio_base64", "")
+        assert isinstance(b64, str) and len(b64) > 1000, f"audio base64 too short: {len(b64)}"
+        # Verify base64 decodes and starts with MP3 magic (ID3 or 0xFF 0xFB frame sync)
+        import base64 as _b64
+        raw = _b64.b64decode(b64)
+        assert len(raw) > 800, f"decoded audio too small: {len(raw)}B"
+        head = raw[:3]
+        assert head[:3] == b"ID3" or (raw[0] == 0xFF and (raw[1] & 0xE0) == 0xE0), \
+            f"not valid MP3 magic bytes: {head!r}"
+
+    def test_tts_empty_text_400(self, client):
+        r = client.post(f"{API}/tts", json={"text": "", "language": "it"}, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 400
+
+    def test_tts_from_briefing_and_cache(self, client):
+        # Get a briefing id
+        r = client.post(f"{API}/news/briefing", json={"topic": "Mercati", "language": "it"}, timeout=AI_TIMEOUT)
+        assert r.status_code == 200
+        bid = r.json()["items"][0]["id"]
+
+        # First call — may be cached from a previous test run
+        t0 = time.time()
+        r1 = client.post(f"{API}/tts", json={"briefing_id": bid, "language": "it"}, timeout=AI_TIMEOUT)
+        elapsed1 = time.time() - t0
+        assert r1.status_code == 200, f"tts briefing failed: {r1.status_code} {r1.text[:300]}"
+        b1 = r1.json()["audio_base64"]
+        assert len(b1) > 1000
+
+        # Second call — MUST be cached and fast
+        t0 = time.time()
+        r2 = client.post(f"{API}/tts", json={"briefing_id": bid, "language": "it"}, timeout=DEFAULT_TIMEOUT)
+        elapsed2 = time.time() - t0
+        assert r2.status_code == 200
+        b2 = r2.json()["audio_base64"]
+        assert b1 == b2, "cached audio differs from first"
+        assert elapsed2 < 5, f"cached tts took {elapsed2:.1f}s — cache likely not used"
+
+
+# ---------------- Public share (NEW iteration 3) ----------------
+class TestPublic:
+    def test_public_briefing_no_auth(self, client):
+        # First create a briefing
+        rb = client.post(f"{API}/news/briefing", json={"topic": "Mercati", "language": "it"}, timeout=AI_TIMEOUT)
+        assert rb.status_code == 200
+        bid = rb.json()["items"][0]["id"]
+
+        # Fetch without any auth header
+        naked = requests.Session()  # no Content-Type/auth
+        r = naked.get(f"{API}/public/{bid}", timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"public failed: {r.status_code} {r.text[:300]}"
+        d = r.json()
+        assert d["id"] == bid
+        # Deep-dive fields should be present (auto-generated if missing)
+        assert d.get("real_reasons"), "public briefing missing real_reasons"
+        assert isinstance(d.get("data_points"), list)
+        assert d.get("context"), "public briefing missing context"
+
+    def test_public_briefing_not_found(self, client):
+        r = client.get(f"{API}/public/nonexistent-abc", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 404
+
+
+# ---------------- Digest (NEW iteration 3) ----------------
+class TestDigest:
+    def test_me_full_includes_digest_flag(self, client, auth_headers):
+        r = client.get(f"{API}/auth/me/full", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert "digest_enabled" in d
+        assert isinstance(d["digest_enabled"], bool)
+
+    def test_digest_preferences_toggle(self, client, auth_headers):
+        # Enable
+        r = client.put(f"{API}/digest/preferences", json={"enabled": True}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        assert r.json()["digest_enabled"] is True
+        # Verify persisted
+        r2 = client.get(f"{API}/auth/me/full", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r2.json()["digest_enabled"] is True
+        # Disable
+        r3 = client.put(f"{API}/digest/preferences", json={"enabled": False}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r3.status_code == 200
+        assert r3.json()["digest_enabled"] is False
+        r4 = client.get(f"{API}/auth/me/full", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r4.json()["digest_enabled"] is False
+
+    def test_digest_preferences_requires_auth(self, client):
+        r = client.put(f"{API}/digest/preferences", json={"enabled": True}, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 401
+
+    def test_digest_send_now(self, client, auth_headers):
+        """Resend free tier will likely return 403 (unverified recipient) → backend returns 502.
+        Either 200 (ok:true) or 502 is acceptable as long as endpoint is wired."""
+        r = client.post(f"{API}/digest/send-now", headers=auth_headers, timeout=AI_TIMEOUT * 2)
+        assert r.status_code in (200, 502), f"unexpected status: {r.status_code} {r.text[:400]}"
+        if r.status_code == 200:
+            d = r.json()
+            assert d.get("ok") is True
+            assert "email" in d
+        # For 502 (Resend free-tier "recipient not verified"), body may be intercepted
+        # by K8s ingress into a generic error page — we still consider endpoint wiring correct
+        # as long as backend logged the Resend error (verified via logs separately).
+
+    def test_digest_send_now_requires_auth(self, client):
+        r = client.post(f"{API}/digest/send-now", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 401

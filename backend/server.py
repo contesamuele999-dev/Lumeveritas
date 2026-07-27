@@ -11,6 +11,9 @@ from datetime import datetime, timezone, timedelta
 import bcrypt, jwt
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.llm.openai import OpenAITextToSpeech
+import base64, resend, feedparser
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -21,6 +24,11 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret')
 JWT_ALG = 'HS256'
 JWT_EXPIRE_DAYS = 30
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'Lume Veritas <onboarding@resend.dev>')
+PUBLIC_APP_URL = os.environ.get('PUBLIC_APP_URL', '')
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -101,6 +109,14 @@ class ExplainIn(BaseModel):
 class ExplainOut(BaseModel):
     word: str
     explanation: str
+
+class DigestPrefIn(BaseModel):
+    enabled: bool
+
+class TTSIn(BaseModel):
+    text: Optional[str] = None
+    briefing_id: Optional[str] = None
+    language: Literal["it", "en"] = "it"
 
 # ------------------ AUTH HELPERS ------------------
 def hash_pw(pw: str) -> str:
@@ -441,7 +457,6 @@ async def list_saved(user = Depends(require_user)):
     by_id = {d["id"]: d for d in docs}
     return [BriefingItem(**by_id[i]) for i in ids if i in by_id]
 
-app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -450,6 +465,328 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ==================== RSS ====================
+RSS_FEEDS = {
+    "mercati": [
+        "https://www.zerohedge.com/fullrss2.xml",
+        "https://feeds.marketwatch.com/marketwatch/topstories/",
+    ],
+    "economia": [
+        "https://www.zerohedge.com/fullrss2.xml",
+        "https://feeds.marketwatch.com/marketwatch/topstories/",
+    ],
+    "cripto": [
+        "https://cointelegraph.com/rss",
+        "https://bitcoinmagazine.com/.rss/full/",
+    ],
+    "scienza": [
+        "https://www.sciencedaily.com/rss/all.xml",
+        "https://phys.org/rss-feed/",
+    ],
+    "tecnologia": [
+        "https://feeds.arstechnica.com/arstechnica/index/",
+        "https://www.theregister.com/headlines.atom",
+    ],
+    "invenzioni": [
+        "https://phys.org/rss-feed/technology-news/",
+        "https://feeds.arstechnica.com/arstechnica/science/",
+    ],
+    "salute": [
+        "https://feeds.feedburner.com/naturalnews/Health",
+        "https://www.who.int/rss-feeds/news-english.xml",
+    ],
+    "ambiente": [
+        "https://feeds.feedburner.com/climatedepot",
+        "https://phys.org/rss-feed/earth-news/",
+    ],
+    "geopolitica": [
+        "https://www.consortiumnews.com/feed/",
+        "https://caitlinjohnstone.com/feed/",
+        "https://moonofalabama.org/index.rdf",
+    ],
+    "guerre": [
+        "https://www.consortiumnews.com/feed/",
+        "https://moonofalabama.org/index.rdf",
+        "https://caitlinjohnstone.com/feed/",
+    ],
+    "politica": [
+        "https://www.commondreams.org/rss.xml",
+        "https://truthout.org/feed/?withoutcomments=1",
+    ],
+    "leggi": [
+        "https://www.commondreams.org/rss.xml",
+        "https://truthout.org/feed/?withoutcomments=1",
+    ],
+    "sondaggi": [
+        "https://news.gallup.com/rss/RSS.aspx?e=politics",
+        "https://www.pewresearch.org/feed/",
+    ],
+    "statistiche": [
+        "https://ourworldindata.org/atom.xml",
+        "https://www.pewresearch.org/feed/",
+    ],
+    "popolazione": [
+        "https://ourworldindata.org/atom.xml",
+        "https://www.pewresearch.org/feed/",
+    ],
+    "societa": [
+        "https://www.commondreams.org/rss.xml",
+        "https://www.pewresearch.org/feed/",
+    ],
+}
+
+TOPIC_KEY_BY_LABEL = {t["label_it"].lower(): t["key"] for t in DEFAULT_TOPICS}
+TOPIC_KEY_BY_LABEL.update({t["label_en"].lower(): t["key"] for t in DEFAULT_TOPICS})
+
+def _clean_summary(s: str, limit: int = 320) -> str:
+    if not s:
+        return ""
+    import re
+    txt = re.sub(r"<[^>]+>", " ", s)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt[:limit]
+
+async def _fetch_feed(url: str, timeout: int = 8) -> list:
+    try:
+        parsed = await asyncio.wait_for(asyncio.to_thread(feedparser.parse, url), timeout=timeout)
+        entries = []
+        for e in parsed.entries[:8]:
+            entries.append({
+                "title": getattr(e, "title", "").strip(),
+                "link": getattr(e, "link", ""),
+                "summary": _clean_summary(getattr(e, "summary", "") or getattr(e, "description", "")),
+                "source": parsed.feed.get("title", url) if hasattr(parsed, "feed") else url,
+                "published": getattr(e, "published", "") or getattr(e, "updated", ""),
+            })
+        return entries
+    except Exception as ex:
+        log.warning(f"RSS fetch failed {url}: {ex}")
+        return []
+
+@api.get("/rss/feed")
+async def rss_feed(topic: str, limit: int = 10):
+    key = TOPIC_KEY_BY_LABEL.get(topic.lower(), topic.lower())
+    urls = RSS_FEEDS.get(key, [])
+    if not urls:
+        return {"topic": topic, "items": []}
+    results = await asyncio.gather(*[_fetch_feed(u) for u in urls])
+    merged = []
+    for r in results:
+        merged.extend(r)
+    # dedup by title
+    seen, out = set(), []
+    for item in merged:
+        t = item["title"].lower()
+        if t and t not in seen:
+            seen.add(t)
+            out.append(item)
+    return {"topic": topic, "items": out[:limit]}
+
+# ==================== TTS ====================
+def _tts_voice(lang: str) -> str:
+    return "nova" if lang == "it" else "alloy"
+
+async def _synthesize(text: str, lang: str) -> str:
+    """Return base64 mp3."""
+    if not text:
+        raise HTTPException(status_code=400, detail="Testo vuoto")
+    text = text.strip()[:3800]
+    try:
+        tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
+        audio_bytes = await tts.generate_speech(text=text, model="tts-1", voice=_tts_voice(lang), response_format="mp3")
+        return base64.b64encode(audio_bytes).decode("ascii")
+    except Exception as e:
+        msg = str(e).lower()
+        if "429" in msg or "rate" in msg or "concurrent" in msg:
+            raise HTTPException(status_code=429, detail="Servizio audio momentaneamente sovraccarico. Riprova.")
+        log.error(f"TTS error: {e}")
+        raise HTTPException(status_code=502, detail="Errore audio.")
+
+@api.post("/tts")
+async def tts_endpoint(inp: TTSIn):
+    text = inp.text
+    lang = inp.language
+    briefing_id = inp.briefing_id
+    if briefing_id:
+        cached = await db.tts_cache.find_one({"briefing_id": briefing_id}, {"_id": 0})
+        if cached:
+            return {"audio_base64": cached["audio_base64"], "mime": "audio/mpeg"}
+        doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
+        if not doc:
+            raise HTTPException(status_code=404, detail="Notizia non trovata")
+        lang = doc.get("language", lang)
+        parts = [doc.get("headline", ""), doc.get("summary", "")]
+        if doc.get("real_reasons"): parts.append(doc["real_reasons"])
+        if doc.get("context"): parts.append(doc["context"])
+        text = ". ".join([p for p in parts if p])
+    if not text:
+        raise HTTPException(status_code=400, detail="Testo mancante")
+    audio_b64 = await _synthesize(text, lang)
+    if briefing_id:
+        await db.tts_cache.update_one(
+            {"briefing_id": briefing_id},
+            {"$set": {"briefing_id": briefing_id, "audio_base64": audio_b64, "created_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    return {"audio_base64": audio_b64, "mime": "audio/mpeg"}
+
+# ==================== PUBLIC SHARE ====================
+@api.get("/public/{briefing_id}", response_model=BriefingItem)
+async def public_briefing(briefing_id: str):
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Notizia non trovata")
+    # ensure deep-dive fields exist for public sharing — generate on demand
+    if not doc.get("real_reasons"):
+        try:
+            await deep_dive(briefing_id)
+            doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
+        except Exception as e:
+            log.warning(f"public deep-dive skipped: {e}")
+    return BriefingItem(**doc)
+
+# ==================== EMAIL DIGEST ====================
+def _digest_html(user_name: str, lang: str, sections: list) -> str:
+    lbl_hello = "Ciao" if lang == "it" else "Hi"
+    lbl_title = "Il tuo digest quotidiano" if lang == "it" else "Your daily digest"
+    lbl_open = "Apri l'app" if lang == "it" else "Open the app"
+    lbl_footer = ("Ricevi questa email perché hai attivato il digest su Lume Veritas. "
+                  "Per disattivarlo, vai su Profilo → Digest.") if lang == "it" else \
+                 ("You get this because you enabled digest on Lume Veritas. Disable it in Profile → Digest.")
+    blocks = []
+    for sec in sections:
+        items_html = "".join(
+            f"""<tr><td style="padding:12px 0;border-bottom:1px solid #e2e2d9;">
+                <div style="font-family:Georgia,serif;font-size:20px;line-height:1.25;color:#111;margin-bottom:6px;">{it['headline']}</div>
+                <div style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.5;">{it['summary']}</div>
+            </td></tr>"""
+            for it in sec["items"][:3]
+        )
+        blocks.append(f"""
+        <tr><td style="padding:24px 0 8px;">
+            <div style="font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#D9381E;">{sec['topic']}</div>
+        </td></tr>
+        {items_html}
+        """)
+    return f"""<!doctype html>
+<html><body style="margin:0;padding:0;background:#f9f9f6;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f9f9f6;padding:32px 0;">
+<tr><td align="center">
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #e2e2d9;">
+<tr><td style="padding:32px 32px 8px;">
+<div style="font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#D9381E;">LUME VERITAS</div>
+<div style="font-family:Georgia,serif;font-size:28px;line-height:1.15;color:#111;margin-top:8px;">{lbl_title}</div>
+<div style="font-family:Arial,sans-serif;font-size:14px;color:#666;margin-top:6px;">{lbl_hello} {user_name},</div>
+</td></tr>
+<tr><td style="padding:0 32px 24px;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0">{''.join(blocks)}</table>
+<div style="padding:24px 0 8px;">
+<a href="{PUBLIC_APP_URL}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:14px 22px;font-family:Arial,sans-serif;font-size:12px;letter-spacing:0.15em;text-transform:uppercase;">{lbl_open}</a>
+</div>
+</td></tr>
+<tr><td style="padding:16px 32px 32px;border-top:1px solid #e2e2d9;">
+<div style="font-family:Arial,sans-serif;font-size:11px;color:#999;line-height:1.5;">{lbl_footer}</div>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>"""
+
+async def build_digest_for_user(user_doc: dict) -> Optional[dict]:
+    lang = user_doc.get("language", "it")
+    topic_keys = user_doc.get("preferred_topics") or [t["key"] for t in DEFAULT_TOPICS[:4]]
+    topic_keys = topic_keys[:4]
+    sections = []
+    for k in topic_keys:
+        topic_meta = next((t for t in DEFAULT_TOPICS if t["key"] == k), None)
+        if not topic_meta: continue
+        label = topic_meta["label_it"] if lang == "it" else topic_meta["label_en"]
+        try:
+            res = await news_briefing(BriefingIn(topic=label, language=lang, refresh=False))
+            if res.items:
+                sections.append({"topic": label, "items": [i.model_dump() for i in res.items[:3]]})
+        except Exception as e:
+            log.warning(f"digest section failed {k}: {e}")
+    if not sections:
+        return None
+    return {"lang": lang, "html": _digest_html(user_doc.get("name") or user_doc["email"].split("@")[0], lang, sections)}
+
+async def send_digest_to_user(user_doc: dict) -> bool:
+    if not RESEND_API_KEY:
+        log.warning("RESEND_API_KEY missing, skip email")
+        return False
+    payload = await build_digest_for_user(user_doc)
+    if not payload:
+        return False
+    subject = "Lume Veritas — Il tuo digest quotidiano" if payload["lang"] == "it" else "Lume Veritas — Your daily digest"
+    params = {
+        "from": SENDER_EMAIL,
+        "to": [user_doc["email"]],
+        "subject": subject,
+        "html": payload["html"],
+    }
+    try:
+        r = await asyncio.to_thread(resend.Emails.send, params)
+        await db.digest_log.insert_one({
+            "user_id": user_doc["id"], "email": user_doc["email"],
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "resend_id": (r or {}).get("id"),
+        })
+        return True
+    except Exception as e:
+        log.error(f"Resend send failed to {user_doc['email']}: {e}")
+        return False
+
+async def run_daily_digest():
+    log.info("Running daily digest job")
+    cursor = db.users.find({"digest_enabled": True}, {"_id": 0, "password_hash": 0})
+    users = await cursor.to_list(1000)
+    log.info(f"Digest recipients: {len(users)}")
+    for u in users:
+        try:
+            await send_digest_to_user(u)
+            await asyncio.sleep(2)  # gentle pacing for LLM concurrency
+        except Exception as e:
+            log.error(f"digest error for {u.get('email')}: {e}")
+
+@api.put("/digest/preferences")
+async def digest_prefs(inp: DigestPrefIn, user = Depends(require_user)):
+    await db.users.update_one({"id": user["id"]}, {"$set": {"digest_enabled": inp.enabled}})
+    return {"ok": True, "digest_enabled": inp.enabled}
+
+@api.post("/digest/send-now")
+async def digest_send_now(user = Depends(require_user)):
+    ok = await send_digest_to_user(user)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Impossibile inviare il digest ora. Controlla le tue preferenze o riprova.")
+    return {"ok": True, "email": user["email"]}
+
+# --- extend UserOut to include digest flag ---
+@api.get("/auth/me/full")
+async def me_full(user = Depends(require_user)):
+    return {
+        "id": user["id"], "email": user["email"], "name": user.get("name"),
+        "preferred_topics": user.get("preferred_topics", []),
+        "language": user.get("language", "it"),
+        "digest_enabled": bool(user.get("digest_enabled", False)),
+    }
+
+# ==================== SCHEDULER ====================
+scheduler: Optional[AsyncIOScheduler] = None
+
+@app.on_event("startup")
+async def _startup():
+    global scheduler
+    scheduler = AsyncIOScheduler(timezone="Europe/Rome")
+    scheduler.add_job(run_daily_digest, "cron", hour=8, minute=0, id="daily_digest")
+    scheduler.start()
+    log.info("Scheduler started (daily digest at 08:00 Europe/Rome)")
+
+app.include_router(api)
+
 @app.on_event("shutdown")
 async def _shutdown():
+    global scheduler
+    if scheduler:
+        scheduler.shutdown(wait=False)
     client.close()
