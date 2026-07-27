@@ -12,12 +12,13 @@ export default function TopicPills({ topics, selected, onSelect, testidPrefix = 
             key={topic.key}
             data-testid={`${testidPrefix}-${topic.key}`}
             onClick={() => onSelect(topic)}
-            className={`px-4 h-11 border font-mono-caps transition-colors ${
+            className={`px-4 h-11 border font-mono-caps transition-colors flex items-center gap-2 ${
               active
                 ? "bg-foreground text-background border-foreground"
                 : "bg-transparent border-border hover:border-foreground hover:bg-secondary"
-            }`}
+            } ${topic.custom ? "border-dashed" : ""}`}
           >
+            {topic.custom && <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />}
             {label}
           </button>
         );

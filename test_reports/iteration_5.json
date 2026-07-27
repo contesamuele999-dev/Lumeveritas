@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 5 testing complete. Backend: 61/61 pytest tests PASS (100%) — all 47 previous tests still green PLUS 12 new TestCustomTopics tests (auth guards on POST/GET/DELETE, 422 for label too short/too long, successful creation with LLM translation to English, key='custom-energia-nucleare', duplicate label returns same key without creating dup, /topics/mine lists added, /auth/me/full.custom_topics includes it, custom key auto-added to preferred_topics, freeform topic 'Energia nucleare' works in POST /news/briefing, DELETE removes from both custom_topics AND preferred_topics) + 2 new TestOgImageDate tests (byte-identical repeat renders prove date is derived from stable doc.generated_at). Frontend Playwright verified end-to-end: (1) META-TAG FIX CONFIRMED — on /s/:id the DOM has EXACTLY 1 of each og:title, og:description, og:type, og:site_name, og:image, og:url, twitter:card, twitter:title, twitter:description, and name=description; og:title content equals the article headline ('Riforma del Mercato dei Crediti di Carbonio: Standard CCP'). Homepage / contains ZERO og:*/twitter:*/description meta tags (only <title> remains). Curl of / page source also confirms no default og/twitter meta in HTML. (2) CUSTOM TOPICS UI — /profile shows 'Argomenti personalizzati' section; add-topic-input + add-topic-btn create a pill with data-testid='remove-topic-custom-energia-nucleare' inside custom-topics-list; the new topic appears on homepage in TopicPills with border-dashed class + accent-color dot indicator; clicking the pill triggers a briefing for that freeform topic; clicking X removes the pill and it disappears from both /profile and homepage.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 964 lines (was 899) — well beyond the 700-line soft cap. Strongly recommend splitting into routers/{auth,news,rss,tts,digest,public,og,topics}.py, services/{llm,tts,email}.py, jobs/scheduler.py, models.py, config.py. Not blocking but harms maintainability.",
+    "add_custom_topic makes a synchronous LLM call inside a request handler (2-4s user-perceived latency). Consider (a) accepting label_en as an optional user-provided override, (b) queueing translation as a background task and returning label_en=label_it immediately with an async patch, or (c) caching translations by slug in a shared collection to avoid re-translating popular topics across users.",
+    "add_custom_topic dedupe check happens BEFORE persistence but there's a small race window where two concurrent POSTs with the same label from the same user could both slip through and cause a duplicate. Consider $addToSet with an atomic filter that verifies the key is not already in custom_topics.",
+    "No max cap on custom_topics per user — a user could POST hundreds of custom topics, bloating the user doc. Recommend enforcing e.g. len(custom_topics) < 30 in the handler.",
+    "delete_custom_topic uses $set with two array replacements. If the user simultaneously adds a topic, one write could clobber the other. Consider $pull for both fields (custom_topics and preferred_topics) to be race-safe.",
+    "_render_og_image now correctly parses generated_at via datetime.fromisoformat(published_iso.replace('Z','+00:00')); good. Edge case: if generated_at is a datetime (not a string) from Mongo, .replace() will fail — protected by try/except, but silently falls back to today's date. Consider isinstance check + logging.",
+    "ProfilePage.jsx renders 'Argomenti personalizzati' as both a mono-caps label AND an h2 with the same text (lines 143 and 145). Redundant — remove one for cleaner hierarchy.",
+    "AuthContext.jsx: addCustomTopic() awaits fetchMe() but doesn't handle server errors distinctly from network errors. If the POST returns 400/422, the user still sees the generic error toast — the error.response.data.detail is only surfaced when it exists as a plain string (Pydantic 422 returns an array of detail dicts, which will render '[object Object]' or similar).",
+    "HomePage.jsx line 26 does `.map(t => ({ ...t, custom: true }))` but the backend already returns `custom: true`. Redundant but harmless; consider trusting the backend flag.",
+    "The /api/topics/custom endpoint doesn't validate that label is not empty AFTER strip (e.g., label='   '). Pydantic min_length=2 counts spaces, so label='  ' passes validation but then label.strip() gives empty string, and _slugify('') returns 'topic', leading to a garbage key 'custom-topic'. Add `if not label: raise HTTPException(400)` after strip."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (61/61 pytest cases including 14 new for iter 5: 12 TestCustomTopics + 2 TestOgImageDate)",
+    "frontend": "100% — meta-tag deduplication fixed (verified DOM has exactly 1 of each og:*/twitter:*/description on /s/:id, zero on /); custom-topic add/remove flow works end-to-end; custom pill visible with border-dashed + accent dot on homepage; freeform topic briefing loads; all previous flows (login, briefing, deep-dive, ask, RSS, TTS, share, digest, ClickableText, saved) still work."
+  },
+  "test_credentials": "Backend tests create per-run unique users (test+<ts>_<uuid>@lume.dev / LumeTest2026!). Frontend Playwright creates test.iter5.<ts>@lume.dev / LumeTest2026!. No shared credentials.",
+  "seed_data_creation": "None. Each test class creates its own briefings via POST /news/briefing (topics 'Statistiche', 'Ambiente', 'Salute') and cleans up custom topics via DELETE at end of TestCustomTopics.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py now has 61 tests (was 47). Added TestCustomTopics (12) + TestOgImageDate (2). Both fully green. The meta-tag duplication bug from iter 4 is resolved — index.html was correctly stripped of default og:*/twitter:*/description tags. Only <title> and <meta name=viewport>/<meta charset>/<meta name=theme-color> remain in the raw HTML. On /s/:id, Helmet is now the single authority for social meta tags and the DOM contains exactly one occurrence of each. The OG image now uses briefing.generated_at (verified: two consecutive renders of the same briefing return byte-identical PNGs, proving the date source is stable across time-of-day changes). Custom-topic feature (POST /api/topics/custom, GET /api/topics/mine, DELETE /api/topics/custom/{key}) is fully functional including LLM-translated label_en, auto-append to preferred_topics, duplicate suppression, and Pydantic validation (min=2, max=48). Frontend ProfilePage.jsx and HomePage.jsx integrate cleanly.",
+  "rca of the issue": "N/A — no bugs found this iteration. Iter-4 meta-tag duplication bug is fully resolved: /app/frontend/public/index.html no longer declares default og:*/twitter:*/description meta tags, making react-helmet-async the single source of truth on pages that use <Helmet>. Verified via document.head.querySelectorAll counts on both /s/:id (exactly 1 of each) and / (exactly 0 of each) plus curl of / page source (no matches). The OG image date bug is also fixed: _render_og_image(topic, headline, published_iso) parses briefing.generated_at instead of using datetime.now(), verified by deterministic (byte-identical) repeat renders of the same briefing id."
+}

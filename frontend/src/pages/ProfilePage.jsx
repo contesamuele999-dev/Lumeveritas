@@ -5,10 +5,10 @@ import { api } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { toast } from "sonner";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, LogOut, Mail, Send } from "lucide-react";
+import { Loader2, LogOut, Mail, Send, Plus, X, Sparkles } from "lucide-react";
 
 export default function ProfilePage() {
-  const { user, updatePrefs, logout, loading, refresh } = useAuth();
+  const { user, updatePrefs, logout, loading, addCustomTopic, removeCustomTopic } = useAuth();
   const { lang, setLang } = useLang();
   const nav = useNavigate();
   const [topics, setTopics] = useState([]);
@@ -16,6 +16,8 @@ export default function ProfilePage() {
   const [busy, setBusy] = useState(false);
   const [digest, setDigest] = useState(false);
   const [sendingNow, setSendingNow] = useState(false);
+  const [newTopicLabel, setNewTopicLabel] = useState("");
+  const [addingTopic, setAddingTopic] = useState(false);
 
   useEffect(() => {
     api.get("/topics").then(({ data }) => setTopics(data));
@@ -134,6 +136,76 @@ export default function ProfilePage() {
         >
           {busy && <Loader2 className="w-4 h-4 animate-spin" />} {t(lang, "save_prefs")}
         </button>
+      </section>
+
+      <section>
+        <div className="flex items-center gap-2 font-mono-caps text-accent mb-2">
+          <Sparkles className="w-4 h-4" /> {t(lang, "custom_topics_title")}
+        </div>
+        <h2 className="font-serif-display text-2xl md:text-3xl mb-2">{t(lang, "custom_topics_title")}</h2>
+        <p className="text-base text-foreground/80 max-w-2xl mb-5">{t(lang, "custom_topics_desc")}</p>
+
+        <form
+          data-testid="add-topic-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const label = newTopicLabel.trim();
+            if (!label) return;
+            setAddingTopic(true);
+            try {
+              await addCustomTopic(label);
+              toast.success(t(lang, "topic_added"));
+              setNewTopicLabel("");
+            } catch (err) {
+              toast.error(err?.response?.data?.detail || t(lang, "error_generic"));
+            } finally { setAddingTopic(false); }
+          }}
+          className="flex items-stretch border border-foreground bg-background max-w-2xl mb-5 h-14"
+        >
+          <input
+            data-testid="add-topic-input"
+            value={newTopicLabel}
+            onChange={(e) => setNewTopicLabel(e.target.value)}
+            placeholder={t(lang, "add_topic_placeholder")}
+            maxLength={48}
+            className="flex-1 bg-transparent outline-none px-4 text-base"
+          />
+          <button
+            type="submit"
+            disabled={addingTopic || !newTopicLabel.trim()}
+            data-testid="add-topic-btn"
+            className="px-5 font-mono-caps bg-foreground text-background hover:bg-accent transition-colors flex items-center gap-2 disabled:opacity-60"
+          >
+            {addingTopic ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {t(lang, "add_topic_btn")}
+          </button>
+        </form>
+
+        {(user?.custom_topics || []).length > 0 && (
+          <div className="flex flex-wrap gap-2" data-testid="custom-topics-list">
+            {user.custom_topics.map((ct) => (
+              <div key={ct.key} className="h-11 pl-4 pr-2 border border-dashed border-foreground font-mono-caps flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />
+                <span>{lang === "it" ? ct.label_it : ct.label_en}</span>
+                <button
+                  data-testid={`remove-topic-${ct.key}`}
+                  onClick={async () => {
+                    try {
+                      await removeCustomTopic(ct.key);
+                      toast.success(t(lang, "topic_removed"));
+                    } catch (err) {
+                      toast.error(t(lang, "error_generic"));
+                    }
+                  }}
+                  className="w-8 h-8 flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
+                  title={t(lang, "remove")}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="border-y border-border py-8">

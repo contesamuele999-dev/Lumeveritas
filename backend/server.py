@@ -113,6 +113,15 @@ class ExplainOut(BaseModel):
     word: str
     explanation: str
 
+class CustomTopicIn(BaseModel):
+    label: str = Field(min_length=2, max_length=48)
+
+class CustomTopic(BaseModel):
+    key: str
+    label_it: str
+    label_en: str
+    custom: bool = True
+
 class DigestPrefIn(BaseModel):
     enabled: bool
 
@@ -234,6 +243,55 @@ async def root():
 @api.get("/topics")
 async def get_topics():
     return DEFAULT_TOPICS
+
+def _slugify(txt: str) -> str:
+    import re, unicodedata
+    txt = unicodedata.normalize("NFKD", txt).encode("ascii", "ignore").decode()
+    txt = re.sub(r"[^a-zA-Z0-9]+", "-", txt).strip("-").lower()
+    return txt[:40] or "topic"
+
+@api.get("/topics/mine", response_model=List[CustomTopic])
+async def get_my_topics(user = Depends(require_user)):
+    doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "custom_topics": 1})
+    return [CustomTopic(**t) for t in (doc or {}).get("custom_topics", [])]
+
+@api.post("/topics/custom", response_model=CustomTopic)
+async def add_custom_topic(inp: CustomTopicIn, user = Depends(require_user)):
+    label = inp.label.strip()
+    key = f"custom-{_slugify(label)}"
+    doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "custom_topics": 1, "preferred_topics": 1})
+    existing = (doc or {}).get("custom_topics", [])
+    # dedupe by key
+    if any(t.get("key") == key for t in existing):
+        for t in existing:
+            if t.get("key") == key:
+                return CustomTopic(**t)
+    # ask LLM for EN translation (small call). If it fails, keep the same label.
+    label_en = label
+    try:
+        session = f"topic-tr-{uuid.uuid4()}"
+        prompt = f'Translate this news topic to English (max 4 words, return only the translation, no quotes): "{label}"'
+        tx = await llm_text(session, "You translate short topic names.", prompt)
+        cand = tx.strip().strip('"').strip("'").split("\n")[0]
+        if 2 <= len(cand) <= 60:
+            label_en = cand
+    except Exception:
+        pass
+    new_topic = {"key": key, "label_it": label, "label_en": label_en, "custom": True}
+    new_list = existing + [new_topic]
+    # auto-add to preferred_topics
+    new_prefs = list(dict.fromkeys((doc or {}).get("preferred_topics", []) + [key]))
+    await db.users.update_one({"id": user["id"]}, {"$set": {"custom_topics": new_list, "preferred_topics": new_prefs}})
+    return CustomTopic(**new_topic)
+
+@api.delete("/topics/custom/{topic_key}")
+async def remove_custom_topic(topic_key: str, user = Depends(require_user)):
+    doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "custom_topics": 1, "preferred_topics": 1})
+    existing = (doc or {}).get("custom_topics", [])
+    new_list = [t for t in existing if t.get("key") != topic_key]
+    new_prefs = [k for k in (doc or {}).get("preferred_topics", []) if k != topic_key]
+    await db.users.update_one({"id": user["id"]}, {"$set": {"custom_topics": new_list, "preferred_topics": new_prefs}})
+    return {"ok": True}
 
 # --- AUTH ---
 @api.post("/auth/register", response_model=TokenOut)
@@ -681,7 +739,7 @@ def _wrap_text(draw, text, font, max_width):
         lines.append(cur)
     return lines
 
-def _render_og_image(topic: str, headline: str) -> bytes:
+def _render_og_image(topic: str, headline: str, published_iso: Optional[str] = None) -> bytes:
     W, H = 1200, 630
     bg = (249, 249, 246)
     fg = (17, 17, 17)
@@ -730,7 +788,13 @@ def _render_og_image(topic: str, headline: str) -> bytes:
     # bottom rule + CTA
     draw.line([(pad + 40, H - pad - 90), (W - pad - 40, H - pad - 90)], fill=fg, width=2)
     draw.text((pad + 40, H - pad - 70), "APPROFONDISCI SU LUME.VERITAS", font=f_mono, fill=fg)
-    ts = datetime.now(timezone.utc).strftime("%d.%m.%Y").upper()
+    if published_iso:
+        try:
+            ts = datetime.fromisoformat(published_iso.replace("Z", "+00:00")).strftime("%d.%m.%Y").upper()
+        except Exception:
+            ts = datetime.now(timezone.utc).strftime("%d.%m.%Y").upper()
+    else:
+        ts = datetime.now(timezone.utc).strftime("%d.%m.%Y").upper()
     tsw = draw.textbbox((0, 0), ts, font=f_mono)
     draw.text((W - pad - 40 - (tsw[2] - tsw[0]), H - pad - 70), ts, font=f_mono, fill=muted)
     buf = io.BytesIO()
@@ -739,12 +803,11 @@ def _render_og_image(topic: str, headline: str) -> bytes:
 
 @api.get("/og/{briefing_id}.png")
 async def og_image(briefing_id: str):
-    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0, "topic": 1, "headline": 1})
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0, "topic": 1, "headline": 1, "generated_at": 1})
     if not doc:
-        # fallback image
         png = _render_og_image("LUME VERITAS", "Le notizie che i giornali trascurano.")
     else:
-        png = _render_og_image(doc.get("topic", ""), doc.get("headline", ""))
+        png = _render_og_image(doc.get("topic", ""), doc.get("headline", ""), doc.get("generated_at"))
     return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 # ==================== EMAIL DIGEST ====================
@@ -876,6 +939,7 @@ async def me_full(user = Depends(require_user)):
         "preferred_topics": user.get("preferred_topics", []),
         "language": user.get("language", "it"),
         "digest_enabled": bool(user.get("digest_enabled", False)),
+        "custom_topics": user.get("custom_topics", []),
     }
 
 # ==================== SCHEDULER ====================

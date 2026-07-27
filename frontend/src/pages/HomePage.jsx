@@ -22,13 +22,18 @@ export default function HomePage() {
     api.get("/topics").then(({ data }) => setTopics(data));
   }, []);
 
-  const visibleTopics = useMemo(() => {
-    if (!user || !user.preferred_topics?.length) return topics;
-    const keys = new Set(user.preferred_topics);
-    const preferred = topics.filter(x => keys.has(x.key));
-    const rest = topics.filter(x => !keys.has(x.key));
-    return [...preferred, ...rest];
+  const allTopics = useMemo(() => {
+    const custom = (user?.custom_topics || []).map(t => ({ ...t, custom: true }));
+    return [...topics, ...custom];
   }, [topics, user]);
+
+  const visibleTopics = useMemo(() => {
+    if (!user || !user.preferred_topics?.length) return allTopics;
+    const keys = new Set(user.preferred_topics);
+    const preferred = allTopics.filter(x => keys.has(x.key));
+    const rest = allTopics.filter(x => !keys.has(x.key));
+    return [...preferred, ...rest];
+  }, [allTopics, user]);
 
   useEffect(() => {
     if (!topics.length) return;

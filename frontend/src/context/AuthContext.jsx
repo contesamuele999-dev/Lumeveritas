@@ -11,7 +11,7 @@ export function AuthProvider({ children }) {
     const t = localStorage.getItem("lv_token");
     if (!t) { setUser(null); setLoading(false); return; }
     try {
-      const { data } = await api.get("/auth/me");
+      const { data } = await api.get("/auth/me/full");
       setUser(data);
     } catch (e) {
       localStorage.removeItem("lv_token");
@@ -26,14 +26,14 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
     localStorage.setItem("lv_token", data.token);
-    setUser(data.user);
+    await fetchMe();
     return data.user;
   };
 
   const register = async (email, password, name) => {
     const { data } = await api.post("/auth/register", { email, password, name });
     localStorage.setItem("lv_token", data.token);
-    setUser(data.user);
+    await fetchMe();
     return data.user;
   };
 
@@ -43,13 +43,24 @@ export function AuthProvider({ children }) {
   };
 
   const updatePrefs = async (patch) => {
-    const { data } = await api.put("/auth/preferences", patch);
-    setUser(data);
+    await api.put("/auth/preferences", patch);
+    await fetchMe();
+    return user;
+  };
+
+  const addCustomTopic = async (label) => {
+    const { data } = await api.post("/topics/custom", { label });
+    await fetchMe();
     return data;
   };
 
+  const removeCustomTopic = async (key) => {
+    await api.delete(`/topics/custom/${encodeURIComponent(key)}`);
+    await fetchMe();
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, updatePrefs, refresh: fetchMe }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updatePrefs, addCustomTopic, removeCustomTopic, refresh: fetchMe }}>
       {children}
     </AuthContext.Provider>
   );
