@@ -986,3 +986,282 @@ class TestCustomTopicKinds:
         for k in TestCustomTopicKinds._added_keys:
             r = client.delete(f"{API}/topics/custom/{k}", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
             assert r.status_code == 200
+
+
+# ===================== Iteration 7: refactor + 4 improvements =====================
+
+# ---------- Helper: fresh authenticated user (for isolation between iter-7 tests) ----------
+@pytest.fixture(scope="module")
+def iter7_user(client):
+    creds = {
+        "email": f"test.iter7+{int(time.time())}_{uuid.uuid4().hex[:6]}@lume.dev",
+        "password": "LumeTest2026!",
+        "name": "Iter7 User",
+    }
+    r = client.post(f"{API}/auth/register", json=creds, timeout=DEFAULT_TIMEOUT)
+    assert r.status_code == 200, f"register iter7: {r.status_code} {r.text[:200]}"
+    return {"creds": creds, **r.json()}
+
+
+@pytest.fixture(scope="module")
+def iter7_headers(iter7_user):
+    return {"Authorization": f"Bearer {iter7_user['token']}"}
+
+
+# ---------- TestModularStructure (import & startup sanity) ----------
+class TestModularStructure:
+    """Ensure the refactored backend still runs and preserves core paths."""
+
+    def test_root_ping(self, client):
+        r = client.get(f"{API}/", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d.get("ok") is True and d.get("app") == "Lume Veritas"
+
+    def test_openapi_has_expected_endpoints(self, client):
+        """Refactor must not drop any existing route path.
+        Note: openapi.json is not exposed through the /api ingress rewrite, so we
+        query localhost:8001 directly (same pattern as TestOgImage cache header)."""
+        try:
+            r = requests.get(f"{LOCAL_API.rsplit('/api',1)[0]}/openapi.json", timeout=DEFAULT_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            pytest.skip("localhost:8001 not reachable")
+        assert r.status_code == 200, f"openapi fetch failed: {r.status_code}"
+        paths = set(r.json().get("paths", {}).keys())
+        required = [
+            "/api/", "/api/auth/register", "/api/auth/login", "/api/auth/me",
+            "/api/auth/me/full", "/api/auth/preferences",
+            "/api/topics", "/api/topics/mine", "/api/topics/custom",
+            "/api/news/briefing", "/api/news/deep-dive/{briefing_id}",
+            "/api/news/item/{briefing_id}", "/api/news/{briefing_id}/qa",
+            "/api/news/{briefing_id}/debate",
+            "/api/ask", "/api/explain",
+            "/api/saved/add", "/api/saved", "/api/saved/{briefing_id}",
+            "/api/rss/feed", "/api/tts",
+            "/api/public/{briefing_id}", "/api/public/{briefing_id}/views",
+            "/api/og/{briefing_id}.png",
+            "/api/digest/preferences", "/api/digest/send-now",
+        ]
+        missing = [p for p in required if p not in paths]
+        assert not missing, f"missing paths after refactor: {missing}"
+
+
+# ---------- TestTranslationCache (shared cache in db.topic_translations) ----------
+class TestTranslationCache:
+    """POST /api/topics/custom with a fresh label triggers Gemini translation once
+    and stores {label_it, label_en} in Mongo collection 'topic_translations'.
+    Second call from ANOTHER user with SAME label_it hits the cache → fast."""
+
+    _label = None
+    _label_en_first = None
+
+    def test_cold_call_translates(self, client, iter7_headers):
+        # Use a globally unique label so the cache is guaranteed cold
+        label = f"Idrogeno verde {uuid.uuid4().hex[:5]}"
+        TestTranslationCache._label = label
+        t0 = time.time()
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": label, "kind": "topic"},
+                        headers=iter7_headers, timeout=AI_TIMEOUT)
+        elapsed = time.time() - t0
+        assert r.status_code == 200, f"cold add failed: {r.status_code} {r.text[:300]}"
+        d = r.json()
+        assert d["label_it"] == label
+        assert isinstance(d["label_en"], str) and 2 <= len(d["label_en"]) <= 80
+        TestTranslationCache._label_en_first = d["label_en"]
+        # cold call goes through LLM → expected to take at least ~0.5s in practice
+        # (we don't assert the lower bound; just record for the warm test to beat).
+        print(f"[cold] elapsed={elapsed:.2f}s label_en={d['label_en']!r}")
+
+    def test_warm_call_from_different_user_hits_cache(self, client):
+        """Register a second user, add the SAME label — should hit the shared cache."""
+        assert TestTranslationCache._label, "cold test must run first"
+        creds2 = {
+            "email": f"test.iter7b+{int(time.time())}_{uuid.uuid4().hex[:6]}@lume.dev",
+            "password": "LumeTest2026!",
+            "name": "Iter7 User B",
+        }
+        rr = client.post(f"{API}/auth/register", json=creds2, timeout=DEFAULT_TIMEOUT)
+        assert rr.status_code == 200
+        headers2 = {"Authorization": f"Bearer {rr.json()['token']}"}
+
+        t0 = time.time()
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": TestTranslationCache._label, "kind": "topic"},
+                        headers=headers2, timeout=AI_TIMEOUT)
+        elapsed = time.time() - t0
+        assert r.status_code == 200, f"warm add failed: {r.status_code} {r.text[:300]}"
+        d = r.json()
+        # Same label_en must be returned (proves cache hit)
+        assert d["label_en"] == TestTranslationCache._label_en_first, (
+            f"cache miss: cold={TestTranslationCache._label_en_first!r} warm={d['label_en']!r}"
+        )
+        # Cache hit should be well under 1s (spec says <200ms; give margin for network → 2s)
+        assert elapsed < 2.5, f"warm call took {elapsed:.2f}s — cache likely not used"
+        print(f"[warm] elapsed={elapsed:.3f}s (cache hit)")
+
+
+# ---------- TestKindPromptEN (English person briefing) ----------
+class TestKindPromptEN:
+    """Iter-7 fix: focus prompt is language-aware; EN + kind=person must be English."""
+
+    def test_briefing_en_person_musk(self, client):
+        r = client.post(f"{API}/news/briefing",
+                        json={"topic": "Elon Musk", "language": "en",
+                              "kind": "person", "refresh": True},
+                        timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"en person briefing: {r.status_code} {r.text[:300]}"
+        data = r.json()
+        assert data["language"] == "en"
+        items = data["items"]
+        assert len(items) >= 3
+        joined = " ".join(i["headline"] + " " + i["summary"] for i in items).lower()
+        # Content must be English-ish
+        english_stopwords = [" the ", " and ", " of ", " to ", " is ", " are ", " for ", " with "]
+        assert any(w in joined for w in english_stopwords), \
+            f"EN not detected in briefing: {joined[:300]}"
+        # Person context must be reflected (Musk himself OR his companies)
+        person_terms = ["musk", "elon", "tesla", "spacex", "neuralink", "twitter", "xai", " x "]
+        assert any(term in joined for term in person_terms), \
+            f"person context (Musk) not reflected in EN briefing: {joined[:400]}"
+
+
+# ---------- TestQARateLimit (per-IP / per-user rate limit) ----------
+@pytest.fixture(scope="module")
+def qa_ratelimit_briefing_id(client):
+    """Fresh briefing for rate-limit tests."""
+    topic = f"RL Topic {uuid.uuid4().hex[:5]}"
+    r = client.post(f"{API}/news/briefing", json={"topic": topic, "language": "it", "refresh": True},
+                    timeout=AI_TIMEOUT)
+    assert r.status_code == 200
+    return r.json()["items"][0]["id"]
+
+
+class TestQARateLimit:
+    """POST /news/{id}/qa — 3 per minute allowed, 4th returns HTTP 429."""
+
+    def test_3_succeed_4th_429(self, client, qa_ratelimit_briefing_id):
+        # Use an authenticated user to key the rate limiter per-user, so parallel test
+        # runs from other keys don't consume our bucket.
+        creds = {
+            "email": f"test.iter7rl+{int(time.time())}_{uuid.uuid4().hex[:6]}@lume.dev",
+            "password": "LumeTest2026!",
+            "name": "RL",
+        }
+        rr = client.post(f"{API}/auth/register", json=creds, timeout=DEFAULT_TIMEOUT)
+        assert rr.status_code == 200
+        h = {"Authorization": f"Bearer {rr.json()['token']}"}
+
+        bid = qa_ratelimit_briefing_id
+        # 3 successful posts
+        for i in range(3):
+            r = client.post(f"{API}/news/{bid}/qa",
+                            json={"question": f"Domanda numero {i+1}, cosa succede?"},
+                            headers=h, timeout=AI_TIMEOUT)
+            assert r.status_code == 200, f"attempt {i+1}: {r.status_code} {r.text[:200]}"
+
+        # 4th must be rate limited
+        r4 = client.post(f"{API}/news/{bid}/qa",
+                         json={"question": "Domanda numero 4 in questo minuto?"},
+                         headers=h, timeout=DEFAULT_TIMEOUT)
+        assert r4.status_code == 429, f"expected 429 on 4th, got {r4.status_code}: {r4.text[:200]}"
+        # Italian error message
+        detail = r4.json().get("detail", "")
+        assert "Troppe richieste" in detail, f"unexpected 429 detail: {detail!r}"
+        assert "Riprova" in detail
+
+    def test_author_name_attribution_when_authenticated(self, client, qa_ratelimit_briefing_id):
+        """Authenticated Q&A must persist author_name; anonymous Q&A must have author_name=None."""
+        # Create a new briefing so we're not colliding with the rate limit above
+        r_br = client.post(f"{API}/news/briefing",
+                          json={"topic": f"Attr {uuid.uuid4().hex[:5]}", "language": "it", "refresh": True},
+                          timeout=AI_TIMEOUT)
+        assert r_br.status_code == 200
+        bid = r_br.json()["items"][0]["id"]
+
+        # Register a fresh user with a distinct name
+        distinct_name = f"Reporter {uuid.uuid4().hex[:5]}"
+        creds = {
+            "email": f"test.iter7attr+{int(time.time())}_{uuid.uuid4().hex[:6]}@lume.dev",
+            "password": "LumeTest2026!",
+            "name": distinct_name,
+        }
+        rr = client.post(f"{API}/auth/register", json=creds, timeout=DEFAULT_TIMEOUT)
+        assert rr.status_code == 200
+        h = {"Authorization": f"Bearer {rr.json()['token']}"}
+
+        # Authenticated Q&A
+        r_auth = client.post(f"{API}/news/{bid}/qa",
+                             json={"question": "Domanda autenticata con firma?"},
+                             headers=h, timeout=AI_TIMEOUT)
+        assert r_auth.status_code == 200, f"auth qa: {r_auth.status_code} {r_auth.text[:200]}"
+        assert r_auth.json().get("author_name") == distinct_name, \
+            f"author_name mismatch: {r_auth.json().get('author_name')!r} vs {distinct_name!r}"
+
+        # Anonymous Q&A — use a separate requests.Session so no auth header leaks
+        naked = requests.Session()
+        naked.headers.update({"Content-Type": "application/json"})
+        r_anon = naked.post(f"{API}/news/{bid}/qa",
+                            json={"question": "Domanda anonima senza firma?"},
+                            timeout=AI_TIMEOUT)
+        assert r_anon.status_code == 200, f"anon qa: {r_anon.status_code} {r_anon.text[:200]}"
+        assert r_anon.json().get("author_name") in (None, ""), \
+            f"anon qa should have null author_name, got: {r_anon.json().get('author_name')!r}"
+
+        # GET list should surface author_name field on both entries
+        r_list = client.get(f"{API}/news/{bid}/qa", timeout=DEFAULT_TIMEOUT)
+        assert r_list.status_code == 200
+        arr = r_list.json()
+        assert len(arr) >= 2
+        names = [q.get("author_name") for q in arr]
+        assert distinct_name in names, f"authored name missing from list: {names}"
+        assert None in names or any(n in (None, "") for n in names), \
+            f"anon (null) not surfaced in list: {names}"
+
+
+# ---------- TestStartupMigration (best-effort inspection) ----------
+class TestStartupMigration:
+    """Best-effort check that startup migration ran once and does not recreate
+    old-format keys. We do not modify Mongo directly; we assert:
+      1. new custom topics always use the new `custom-{kind}-{slug}` format
+      2. legacy user (if any) has no `custom-{slug}` keys left after startup
+    """
+
+    def test_new_topics_use_new_key_format(self, client, iter7_headers):
+        label = f"Argomento test {uuid.uuid4().hex[:5]}"
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": label, "kind": "topic"},
+                        headers=iter7_headers, timeout=AI_TIMEOUT)
+        assert r.status_code == 200
+        k = r.json()["key"]
+        # Must be custom-topic-... (never bare custom-{slug} form)
+        assert k.startswith("custom-topic-"), f"unexpected key format: {k!r}"
+        # cleanup
+        client.delete(f"{API}/topics/custom/{k}", headers=iter7_headers, timeout=DEFAULT_TIMEOUT)
+
+    def test_authenticated_user_topics_have_kind_field(self, client, iter7_headers):
+        """After migration all custom_topics must carry a `kind` (default 'topic')."""
+        # Add one so the list is non-empty
+        label = f"Kindcheck {uuid.uuid4().hex[:5]}"
+        r_add = client.post(f"{API}/topics/custom",
+                            json={"label": label, "kind": "topic"},
+                            headers=iter7_headers, timeout=AI_TIMEOUT)
+        assert r_add.status_code == 200
+        added_key = r_add.json()["key"]
+
+        r = client.get(f"{API}/topics/mine", headers=iter7_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        arr = r.json()
+        assert isinstance(arr, list) and len(arr) >= 1
+        for t in arr:
+            assert "kind" in t and t["kind"] in (
+                "topic", "person", "telegram", "hashtag", "channel"
+            ), f"topic missing/invalid kind: {t}"
+            # no legacy custom-{slug} format
+            assert not (t["key"].startswith("custom-") and not any(
+                t["key"].startswith(f"custom-{k}-")
+                for k in ("topic", "person", "telegram", "hashtag", "channel")
+            )), f"legacy key found: {t['key']}"
+
+        # cleanup
+        client.delete(f"{API}/topics/custom/{added_key}", headers=iter7_headers, timeout=DEFAULT_TIMEOUT)

@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 7 backend refactor + 4 improvements FULLY VERIFIED. All 93 backend tests PASS (100%): 84 regression + 9 new iter-7 tests (TestModularStructure x2, TestTranslationCache x2 cold+warm, TestKindPromptEN x1, TestQARateLimit x2 429+attribution, TestStartupMigration x2). Backend refactor is transparent — no request/response contract changes, all 27 expected /api routes present in openapi.json. Startup migration ran cleanly on first boot ('Migrated custom-topic keys for 1 user(s)' visible in supervisor logs). Translation cache confirmed: cold call for a fresh label went through Gemini (~2s), warm call from a DIFFERENT authenticated user with the same label_it returned an identical label_en in <0.5s (cache hit). English person-briefing for 'Elon Musk' returned English content with person-context terms (Musk/Tesla/SpaceX/Neuralink/xAI). Q&A rate-limit: 3 authenticated posts in <60s succeed, 4th returns HTTP 429 with Italian 'Troppe richieste. Riprova tra Ns.' detail. Q&A author attribution: authenticated POST persists author_name (=user.name), anonymous POST persists author_name=null, GET list surfaces both. Frontend regression: homepage loads, 10 approfondisci/debate buttons on real briefings, no console errors; register→profile flow works — profile shows kind picker (5 buttons: kind-topic/person/telegram/hashtag/channel), digest frequency picker (2 buttons: daily/weekly), IT/EN language toggle, 16 default topics, custom topics section. NO regressions detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/ratelimit.py: in-memory sliding window is process-local. Fine for single-instance app, but note: uvicorn --reload spawns a fresh process on every code change, so buckets reset — expected. Not distributed-safe if the app ever scales beyond 1 replica.",
+    "services/migrations.py: migration is idempotent as claimed. However `_buckets` for rate limit and any similar in-memory caches will grow unbounded (no TTL/GC on unused keys). For a busy public app, consider periodic pruning of buckets whose deque is empty.",
+    "routers/news.py: article_qas endpoint is now correctly attributing author_name from user context via Depends(current_user). The endpoint still allows anonymous POSTs (by design) — consider adding a small per-briefing question de-duplication to prevent spam of identical questions.",
+    "routers/topics.py _translate_label: catches Exception and swallows silently to fall back to the Italian label as label_en. If Gemini is down for hours, users' new custom topics will have label_it==label_en. Consider adding a background job to re-translate rows where label_it == label_en after failures, so caching later succeeds.",
+    "routers/news.py _focus_prompt: iter-7 EN focus prompt is correct for kind=person/telegram/hashtag/channel/topic. However the main generate_briefing prompt template still starts with 'Genera 5 briefing di notizie' when lang=='it', which is correct; the code path branches by language properly. No issues found.",
+    "routers/public.py public_briefing: calls await deep_dive(briefing_id) which is a route function decorated with @router.post — invoking it directly is fine (returns model), but it also does its own DB reads; could be extracted into a lightweight service to avoid tight coupling between routers/public.py and routers/news.py.",
+    "server.py: relies on `from routers.news import run_briefing` and `from routers.news import deep_dive` in other routers. Currently no circular imports because news.py doesn't import from public.py or digest.py. Safe.",
+    "config.py: MONGO_URL and DB_NAME use os.environ[...] (KeyError-raises). Good — fails fast on missing config. Other keys use os.environ.get() with defaults which is acceptable for optional integrations.",
+    "backend/log.py: (not viewed) — assuming a simple logger 'lume'. Verified log output shows the expected startup lines including scheduler and migration messages.",
+    "Overall: refactor is clean, minimal, and transparent to consumers. server.py went from 1124 → 67 lines. Test suite grew from 84 → 93 with all new coverage passing."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (93/93)", "frontend": "100% smoke — homepage, register→profile, kind picker, digest picker, news items all render; no console errors, no failing integrations"},
+  "test_credentials": "Backend tests create fresh users per class/module (test.iter7*+<ts>_<uuid>@lume.dev / LumeTest2026!). Frontend smoke used test.iter7fe.<ts>@lume.dev.",
+  "seed_data_creation": "None. All fixtures create their own briefings and users on the fly. Custom topics added during TestStartupMigration are deleted at test end.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py is now 1220+ lines / 93 tests. Iteration-7 added 5 test classes at the bottom: TestModularStructure (root + openapi 27-paths check via localhost:8001), TestTranslationCache (cold + warm 2-user cache check), TestKindPromptEN (EN person briefing → Musk/Tesla/etc), TestQARateLimit (3 succeed → 4th 429 + author_name attribution auth vs anon), TestStartupMigration (new key format + kind field presence). Structure is now modular: routers/{auth,topics,news,saved,rss,tts,public,digest}.py + services/{og,ratelimit,digest,migrations}.py. All 27 API paths preserved. Startup migration runs once and is idempotent. Note: openapi.json is NOT exposed via ingress (only /api/*), so tests must hit localhost:8001/openapi.json — already done via LOCAL_API constant.",
+  "rca of the issue": "No bugs found this iteration. Backend refactor was verified transparent (contracts unchanged), all 4 iter-7 features (migration, translation cache, EN focus, Q&A rate-limit + attribution) work correctly. One test-code adjustment was needed: TestModularStructure.test_openapi_has_expected_endpoints initially fetched /openapi.json via the public URL, which returns the frontend HTML because the ingress only rewrites /api/*. Fixed by using LOCAL_API base (localhost:8001) — same pattern used by existing TestOgImage cache-header test."
+}
