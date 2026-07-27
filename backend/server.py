@@ -711,13 +711,12 @@ async def build_digest_for_user(user_doc: dict) -> Optional[dict]:
         return None
     return {"lang": lang, "html": _digest_html(user_doc.get("name") or user_doc["email"].split("@")[0], lang, sections)}
 
-async def send_digest_to_user(user_doc: dict) -> bool:
+async def send_digest_to_user(user_doc: dict) -> tuple[bool, Optional[str]]:
     if not RESEND_API_KEY:
-        log.warning("RESEND_API_KEY missing, skip email")
-        return False
+        return False, "resend_key_missing"
     payload = await build_digest_for_user(user_doc)
     if not payload:
-        return False
+        return False, "no_content"
     subject = "Lume Veritas — Il tuo digest quotidiano" if payload["lang"] == "it" else "Lume Veritas — Your daily digest"
     params = {
         "from": SENDER_EMAIL,
@@ -732,10 +731,11 @@ async def send_digest_to_user(user_doc: dict) -> bool:
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "resend_id": (r or {}).get("id"),
         })
-        return True
+        return True, None
     except Exception as e:
-        log.error(f"Resend send failed to {user_doc['email']}: {e}")
-        return False
+        msg = str(e)
+        log.error(f"Resend send failed to {user_doc['email']}: {msg}")
+        return False, msg[:220]
 
 async def run_daily_digest():
     log.info("Running daily digest job")
@@ -745,7 +745,7 @@ async def run_daily_digest():
     for u in users:
         try:
             await send_digest_to_user(u)
-            await asyncio.sleep(2)  # gentle pacing for LLM concurrency
+            await asyncio.sleep(2)
         except Exception as e:
             log.error(f"digest error for {u.get('email')}: {e}")
 
@@ -756,9 +756,14 @@ async def digest_prefs(inp: DigestPrefIn, user = Depends(require_user)):
 
 @api.post("/digest/send-now")
 async def digest_send_now(user = Depends(require_user)):
-    ok = await send_digest_to_user(user)
+    ok, err = await send_digest_to_user(user)
     if not ok:
-        raise HTTPException(status_code=502, detail="Impossibile inviare il digest ora. Controlla le tue preferenze o riprova.")
+        # Return 200 with ok:false so the JSON body reaches the client
+        # (ingress strips bodies on >=502 responses).
+        msg = ("Il servizio email non ha accettato l'invio. "
+               "In modalità test Resend può inviare solo alla mail del proprietario dell'account: "
+               "verifica un dominio su resend.com/domains per inviare a chiunque.")
+        return {"ok": False, "error": err or "unknown", "message": msg}
     return {"ok": True, "email": user["email"]}
 
 # --- extend UserOut to include digest flag ---

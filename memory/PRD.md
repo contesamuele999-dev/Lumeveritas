@@ -16,9 +16,13 @@ User wants a fast, functional web app that collects the newest, verified, deeply
 - Deep-dive endpoint (real reasons, data points, context)
 - Free-form Ask endpoint (structured JSON answer)
 - Save / unsave briefings per user
-- **Click-a-word to explain**: POST /api/explain returns short plain-language explanation; `<ClickableText>` component wraps significant words in Popover triggers inside headlines, summaries, deep-dive real_reasons/data_points/context and ask answers. Cached in Mongo `explanations` collection per language.
-- Graceful 429 handling for Gemini concurrency limits (`llm_text`) + Retry button in AskPage
-- SheetDescription sr-only added to DeepDiveSheet for a11y compliance
+- Click-a-word to explain (Popover + cache)
+- **Daily email digest** via Resend, APScheduler cron 08:00 Europe/Rome. Manual "Send now" from profile. Graceful ok:false JSON on Resend failure so client sees a real actionable message (free-tier limitation).
+- **RSS live feed** from 20+ curated alternative/independent sources per topic (ScienceDaily, Consortium News, MoonOfAlabama, Common Dreams, Cointelegraph, Ars Technica, OurWorldInData, Pew Research, Gallup, etc.)
+- **Audio TTS** with OpenAI TTS (tts-1, voices nova/alloy) for briefings; cached mp3 per briefing in Mongo. Player state machine (idle/loading/playing/paused).
+- **Public shareable URLs** `/s/:id` — no auth required, auto-triggers deep-dive if missing, includes ClickableText + AudioButton + ShareButton.
+- Graceful 429 handling for Gemini + Retry button in AskPage
+- SheetDescription sr-only for a11y
 - Full IT/EN i18n, Light/Dark theme, editorial Newsreader + Manrope + JetBrains Mono
 
 ## User Personas

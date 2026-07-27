@@ -43,10 +43,16 @@ export default function ProfilePage() {
   const sendNow = async () => {
     setSendingNow(true);
     try {
-      await api.post("/digest/send-now");
-      toast.success(t(lang, "digest_sent"));
+      const { data } = await api.post("/digest/send-now");
+      if (data?.ok) {
+        toast.success(t(lang, "digest_sent"));
+      } else {
+        toast.error(data?.message || t(lang, "error_generic"), { duration: 8000 });
+      }
     } catch (e) {
-      toast.error(e?.response?.data?.detail || t(lang, "error_generic"));
+      const d = e?.response?.data;
+      const msg = (d && typeof d === "object" && (d.message || d.detail)) || t(lang, "error_generic");
+      toast.error(msg);
     } finally { setSendingNow(false); }
   };
 
