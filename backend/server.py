@@ -72,6 +72,8 @@ class BriefingIn(BaseModel):
     language: Literal["it", "en"] = "it"
     depth: Literal["short", "deep"] = "short"
     refresh: bool = False
+    kind: Optional[Literal["topic", "person", "telegram", "hashtag", "channel"]] = "topic"
+    source: Optional[str] = None
 
 class BriefingItem(BaseModel):
     id: str
@@ -113,22 +115,50 @@ class ExplainOut(BaseModel):
     word: str
     explanation: str
 
-class CustomTopicIn(BaseModel):
-    label: str = Field(min_length=2, max_length=48)
-
-class CustomTopic(BaseModel):
-    key: str
-    label_it: str
-    label_en: str
-    custom: bool = True
-
 class DigestPrefIn(BaseModel):
-    enabled: bool
+    enabled: Optional[bool] = None
+    frequency: Optional[Literal["daily", "weekly"]] = None
 
 class TTSIn(BaseModel):
     text: Optional[str] = None
     briefing_id: Optional[str] = None
     language: Literal["it", "en"] = "it"
+
+class CustomTopicIn(BaseModel):
+    label: str = Field(min_length=2, max_length=80)
+    kind: Literal["topic", "person", "telegram", "hashtag", "channel"] = "topic"
+    source: Optional[str] = Field(default=None, max_length=200)
+
+class CustomTopic(BaseModel):
+    key: str
+    label_it: str
+    label_en: str
+    kind: str = "topic"
+    source: Optional[str] = None
+    custom: bool = True
+
+class ArticleQAIn(BaseModel):
+    question: str = Field(min_length=3, max_length=500)
+
+class ArticleQA(BaseModel):
+    id: str
+    briefing_id: str
+    question: str
+    answer: str
+    key_points: List[str] = []
+    created_at: str
+
+class DebateSide(BaseModel):
+    persona: str
+    stance: str
+    arguments: List[str] = []
+
+class DebateOut(BaseModel):
+    briefing_id: str
+    sides: List[DebateSide]
+    synthesis: str
+    language: str
+    generated_at: str
 
 # ------------------ AUTH HELPERS ------------------
 def hash_pw(pw: str) -> str:
@@ -260,30 +290,29 @@ async def add_custom_topic(inp: CustomTopicIn, user = Depends(require_user)):
     label = inp.label.strip()
     if len(label) < 2:
         raise HTTPException(status_code=400, detail="Etichetta troppo corta")
-    key = f"custom-{_slugify(label)}"
+    source = (inp.source or "").strip() or None
+    # prefix key by kind so a person and a topic can share a name
+    key = f"custom-{inp.kind}-{_slugify(label if not source else f'{label}-{source}')}"
     doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "custom_topics": 1, "preferred_topics": 1})
     existing = (doc or {}).get("custom_topics", [])
     if len(existing) >= 30:
         raise HTTPException(status_code=400, detail="Hai raggiunto il limite di 30 argomenti personalizzati")
-    # dedupe by key
     if any(t.get("key") == key for t in existing):
         for t in existing:
             if t.get("key") == key:
                 return CustomTopic(**t)
-    # ask LLM for EN translation (small call). If it fails, keep the same label.
     label_en = label
     try:
         session = f"topic-tr-{uuid.uuid4()}"
-        prompt = f'Translate this news topic to English (max 4 words, return only the translation, no quotes): "{label}"'
+        prompt = f'Translate this news topic to English (max 5 words, return only the translation, no quotes): "{label}"'
         tx = await llm_text(session, "You translate short topic names.", prompt)
         cand = tx.strip().strip('"').strip("'").split("\n")[0]
-        if 2 <= len(cand) <= 60:
+        if 2 <= len(cand) <= 80:
             label_en = cand
     except Exception:
         pass
-    new_topic = {"key": key, "label_it": label, "label_en": label_en, "custom": True}
+    new_topic = {"key": key, "label_it": label, "label_en": label_en, "kind": inp.kind, "source": source, "custom": True}
     new_list = existing + [new_topic]
-    # auto-add to preferred_topics
     new_prefs = list(dict.fromkeys((doc or {}).get("preferred_topics", []) + [key]))
     await db.users.update_one({"id": user["id"]}, {"$set": {"custom_topics": new_list, "preferred_topics": new_prefs}})
     return CustomTopic(**new_topic)
@@ -348,24 +377,36 @@ async def update_prefs(inp: PreferencesIn, user = Depends(require_user)):
                    language=doc.get("language", "it"))
 
 # --- NEWS / BRIEFINGS ---
-async def generate_briefing(topic: str, language: str) -> List[BriefingItem]:
+async def generate_briefing(topic: str, language: str, kind: str = "topic", source: Optional[str] = None) -> List[BriefingItem]:
     lang_label = "italiano" if language == "it" else "English"
-    prompt = f"""Genera 5 briefing di notizie sull'argomento: "{topic}".
+    if kind == "person":
+        focus = f'notizie recenti che riguardano la persona "{topic}" — sue dichiarazioni pubbliche, decisioni, contesto attorno.'
+    elif kind == "telegram":
+        src = f' (canale telegram: {source})' if source else ""
+        focus = f'notizie e contenuti recenti nell\'ambito del canale telegram "{topic}"{src}. Se non hai accesso diretto al canale, indica esplicitamente che stai riportando notizie affini all\'area tematica del canale.'
+    elif kind == "hashtag":
+        focus = f'conversazioni e notizie recenti attorno all\'hashtag "{topic}" (o area tematica correlata). Se non hai accesso ai social in tempo reale, descrivi il fenomeno noto e i temi discussi.'
+    elif kind == "channel":
+        src = f' ({source})' if source else ""
+        focus = f'notizie e uscite recenti del canale informativo "{topic}"{src}. Se non hai accesso diretto, riporta l\'area editoriale tipica del canale.'
+    else:
+        focus = f'notizie sull\'argomento: "{topic}".'
+    prompt = f"""Genera 5 briefing di notizie: {focus}
 Priorità: notizie recenti (ultimi 12 mesi) trascurate dai media mainstream, dati concreti, invenzioni, leggi, scoperte, sondaggi, tendenze reali.
 Rispondi SOLO in {lang_label}.
 
-Rispondi ESCLUSIVAMENTE con JSON valido in questa forma esatta:
+Rispondi ESCLUSIVAMENTE con JSON valido:
 {{
   "items": [
     {{
       "headline": "titolo breve e chiaro",
       "summary": "riassunto in 2-3 frasi semplici (adatte a persone non tecniche)",
       "key_facts": ["fatto 1 con numeri/date", "fatto 2", "fatto 3"],
-      "sources_hint": ["tipo di fonte (es: rapporto ONU 2024, studio Lancet, dati Eurostat)"]
+      "sources_hint": ["tipo di fonte"]
     }}
   ]
 }}
-Non inserire testo fuori dal JSON. Non inventare dati specifici se non ne sei sicuro: in tal caso ometti il campo."""
+Nessun testo fuori dal JSON. Non inventare dati specifici se non ne sei sicuro."""
     session_id = f"briefing-{uuid.uuid4()}"
     data = await llm_json(session_id, sys_for(language), prompt)
     now = datetime.now(timezone.utc).isoformat()
@@ -393,7 +434,7 @@ async def news_briefing(inp: BriefingIn):
         }, {"_id": 0}).sort("generated_at", -1).to_list(6)
         if len(cached) >= 3:
             return BriefingListOut(topic=inp.topic, language=inp.language, items=[BriefingItem(**c) for c in cached[:6]])
-    items = await generate_briefing(inp.topic, inp.language)
+    items = await generate_briefing(inp.topic, inp.language, kind=inp.kind or "topic", source=inp.source)
     if items:
         await db.briefings.insert_many([i.model_dump() for i in items])
     return BriefingListOut(topic=inp.topic, language=inp.language, items=items)
@@ -463,6 +504,93 @@ Solo JSON."""
         key_points=data.get("key_points", []) or [],
         caveats=data.get("caveats", []) or [],
     )
+
+# ==================== ARTICLE Q&A ====================
+@api.get("/news/{briefing_id}/qa", response_model=List[ArticleQA])
+async def list_article_qa(briefing_id: str):
+    docs = await db.article_qas.find({"briefing_id": briefing_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return [ArticleQA(**d) for d in docs]
+
+@api.post("/news/{briefing_id}/qa", response_model=ArticleQA)
+async def add_article_qa(briefing_id: str, inp: ArticleQAIn):
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Notizia non trovata")
+    language = doc.get("language", "it")
+    lang_label = "italiano semplice" if language == "it" else "simple English"
+    prompt = f"""L'utente ha una domanda specifica su questa notizia. Rispondi SOLO in {lang_label} in modo chiaro e onesto (max 5 frasi + punti chiave). Se non hai dati sufficienti dillo.
+
+NOTIZIA:
+Titolo: {doc.get('headline','')}
+Riassunto: {doc.get('summary','')}
+Fatti: {doc.get('key_facts',[])}
+{'Motivi reali: ' + doc['real_reasons'] if doc.get('real_reasons') else ''}
+{'Contesto: ' + doc['context'] if doc.get('context') else ''}
+
+DOMANDA DELL'UTENTE: "{inp.question}"
+
+Rispondi con JSON valido:
+{{
+  "answer": "risposta diretta, 3-5 frasi",
+  "key_points": ["punto 1", "punto 2", "punto 3"]
+}}
+Solo JSON."""
+    session = f"qa-{briefing_id}-{uuid.uuid4()}"
+    data = await llm_json(session, sys_for(language), prompt)
+    qa = {
+        "id": str(uuid.uuid4()),
+        "briefing_id": briefing_id,
+        "question": inp.question.strip(),
+        "answer": data.get("answer", ""),
+        "key_points": data.get("key_points", []) or [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.article_qas.insert_one(qa)
+    return ArticleQA(**qa)
+
+# ==================== DEBATE ====================
+@api.post("/news/{briefing_id}/debate", response_model=DebateOut)
+async def debate(briefing_id: str, refresh: bool = False):
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Notizia non trovata")
+    if not refresh:
+        cached = await db.debates.find_one({"briefing_id": briefing_id}, {"_id": 0})
+        if cached:
+            return DebateOut(**cached)
+    language = doc.get("language", "it")
+    lang_label = "italiano" if language == "it" else "English"
+    prompt = f"""Simula un dibattito serio tra 3 punti di vista contrastanti ma competenti sulla seguente notizia. Non fare macchiette: ognuno deve avere una posizione difendibile con argomenti sostanziali.
+
+NOTIZIA:
+Titolo: {doc.get('headline','')}
+Riassunto: {doc.get('summary','')}
+Fatti: {doc.get('key_facts',[])}
+
+Scegli 3 personaggi/ruoli reali e distinti (es. "Economista di mercato", "Sociologo critico", "Storico geopolitico"; oppure "Difensore della legge", "Attivista", "Analista neutrale"). Rispondi SOLO in {lang_label}.
+
+Rispondi con JSON valido:
+{{
+  "sides": [
+    {{"persona": "Ruolo/tipo di esperto 1", "stance": "tesi sintetica in 1 frase", "arguments": ["arg 1 con dati/logica", "arg 2", "arg 3"]}},
+    {{"persona": "Ruolo 2", "stance": "tesi in contrasto", "arguments": ["arg 1", "arg 2", "arg 3"]}},
+    {{"persona": "Ruolo 3", "stance": "prospettiva alternativa", "arguments": ["arg 1", "arg 2", "arg 3"]}}
+  ],
+  "synthesis": "3-4 frasi che evidenziano punti di accordo e disaccordo genuini, senza appiattire"
+}}
+Solo JSON."""
+    session = f"debate-{briefing_id}"
+    data = await llm_json(session, sys_for(language), prompt)
+    sides = [DebateSide(**s) for s in data.get("sides", [])[:4]]
+    out = DebateOut(
+        briefing_id=briefing_id,
+        sides=sides,
+        synthesis=data.get("synthesis", ""),
+        language=language,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    await db.debates.update_one({"briefing_id": briefing_id}, {"$set": out.model_dump()}, upsert=True)
+    return out
 
 # --- WORD / TERM EXPLAIN ---
 @api.post("/explain", response_model=ExplainOut)
@@ -886,7 +1014,11 @@ async def send_digest_to_user(user_doc: dict) -> tuple[bool, Optional[str]]:
     payload = await build_digest_for_user(user_doc)
     if not payload:
         return False, "no_content"
-    subject = "Lume Veritas — Il tuo digest quotidiano" if payload["lang"] == "it" else "Lume Veritas — Your daily digest"
+    freq = user_doc.get("digest_frequency", "daily")
+    if freq == "weekly":
+        subject = "Lume Veritas — Il tuo digest settimanale" if payload["lang"] == "it" else "Lume Veritas — Your weekly digest"
+    else:
+        subject = "Lume Veritas — Il tuo digest quotidiano" if payload["lang"] == "it" else "Lume Veritas — Your daily digest"
     params = {
         "from": SENDER_EMAIL,
         "to": [user_doc["email"]],
@@ -908,9 +1040,9 @@ async def send_digest_to_user(user_doc: dict) -> tuple[bool, Optional[str]]:
 
 async def run_daily_digest():
     log.info("Running daily digest job")
-    cursor = db.users.find({"digest_enabled": True}, {"_id": 0, "password_hash": 0})
+    cursor = db.users.find({"digest_enabled": True, "$or": [{"digest_frequency": "daily"}, {"digest_frequency": {"$exists": False}}]}, {"_id": 0, "password_hash": 0})
     users = await cursor.to_list(1000)
-    log.info(f"Digest recipients: {len(users)}")
+    log.info(f"Daily digest recipients: {len(users)}")
     for u in users:
         try:
             await send_digest_to_user(u)
@@ -918,10 +1050,33 @@ async def run_daily_digest():
         except Exception as e:
             log.error(f"digest error for {u.get('email')}: {e}")
 
+async def run_weekly_digest():
+    log.info("Running weekly digest job")
+    cursor = db.users.find({"digest_enabled": True, "digest_frequency": "weekly"}, {"_id": 0, "password_hash": 0})
+    users = await cursor.to_list(1000)
+    log.info(f"Weekly digest recipients: {len(users)}")
+    for u in users:
+        try:
+            await send_digest_to_user(u)
+            await asyncio.sleep(2)
+        except Exception as e:
+            log.error(f"weekly digest error for {u.get('email')}: {e}")
+
 @api.put("/digest/preferences")
 async def digest_prefs(inp: DigestPrefIn, user = Depends(require_user)):
-    await db.users.update_one({"id": user["id"]}, {"$set": {"digest_enabled": inp.enabled}})
-    return {"ok": True, "digest_enabled": inp.enabled}
+    updates = {}
+    if inp.enabled is not None:
+        updates["digest_enabled"] = inp.enabled
+    if inp.frequency is not None:
+        updates["digest_frequency"] = inp.frequency
+    if updates:
+        await db.users.update_one({"id": user["id"]}, {"$set": updates})
+    doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "digest_enabled": 1, "digest_frequency": 1})
+    return {
+        "ok": True,
+        "digest_enabled": bool((doc or {}).get("digest_enabled", False)),
+        "digest_frequency": (doc or {}).get("digest_frequency", "daily"),
+    }
 
 @api.post("/digest/send-now")
 async def digest_send_now(user = Depends(require_user)):
@@ -943,6 +1098,7 @@ async def me_full(user = Depends(require_user)):
         "preferred_topics": user.get("preferred_topics", []),
         "language": user.get("language", "it"),
         "digest_enabled": bool(user.get("digest_enabled", False)),
+        "digest_frequency": user.get("digest_frequency", "daily"),
         "custom_topics": user.get("custom_topics", []),
     }
 
@@ -954,8 +1110,9 @@ async def _startup():
     global scheduler
     scheduler = AsyncIOScheduler(timezone="Europe/Rome")
     scheduler.add_job(run_daily_digest, "cron", hour=8, minute=0, id="daily_digest")
+    scheduler.add_job(run_weekly_digest, "cron", day_of_week="mon", hour=8, minute=0, id="weekly_digest")
     scheduler.start()
-    log.info("Scheduler started (daily digest at 08:00 Europe/Rome)")
+    log.info("Scheduler started (daily 08:00, weekly Mon 08:00 Europe/Rome)")
 
 app.include_router(api)
 

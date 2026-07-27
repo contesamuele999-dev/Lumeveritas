@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Bookmark, BookmarkCheck, Sparkles } from "lucide-react";
+import { Bookmark, BookmarkCheck, Sparkles, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -14,6 +14,7 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
   const { lang } = useLang();
   const { user } = useAuth();
   const [openDeep, setOpenDeep] = useState(false);
+  const [initialTab, setInitialTab] = useState("deep");
   const [saved, setSaved] = useState(initiallySaved);
   const [busy, setBusy] = useState(false);
 
@@ -69,10 +70,17 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           data-testid={`approfondisci-btn-${item.id}`}
-          onClick={() => setOpenDeep(true)}
+          onClick={() => { setInitialTab("deep"); setOpenDeep(true); }}
           className="h-12 px-5 bg-accent text-accent-foreground hover:opacity-90 transition-opacity font-mono-caps flex items-center gap-2"
         >
           <Sparkles className="w-4 h-4" /> {t(lang, "approfondisci")}
+        </button>
+        <button
+          data-testid={`debate-btn-${item.id}`}
+          onClick={() => { setInitialTab("debate"); setOpenDeep(true); }}
+          className="h-12 px-5 border border-foreground bg-background hover:bg-foreground hover:text-background transition-colors font-mono-caps flex items-center gap-2"
+        >
+          <Users className="w-4 h-4" /> {t(lang, "debate_btn")}
         </button>
         <button
           data-testid={`save-btn-${item.id}`}
@@ -87,7 +95,7 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
         <ShareButton briefingId={item.id} testid={`share-btn-${item.id}`} />
       </div>
 
-      <DeepDiveSheet item={item} open={openDeep} onOpenChange={setOpenDeep} />
+      <DeepDiveSheet item={item} open={openDeep} onOpenChange={setOpenDeep} initialTab={initialTab} />
     </article>
   );
 }

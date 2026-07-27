@@ -45,7 +45,12 @@ export default function HomePage() {
     refresh ? setRefreshing(true) : setLoading(true);
     try {
       const label = lang === "it" ? topic.label_it : topic.label_en;
-      const { data } = await api.post("/news/briefing", { topic: label, language: lang, refresh });
+      const body = { topic: label, language: lang, refresh };
+      if (topic.custom && topic.kind && topic.kind !== "topic") {
+        body.kind = topic.kind;
+        if (topic.source) body.source = topic.source;
+      }
+      const { data } = await api.post("/news/briefing", body);
       setItems(data.items);
     } catch (e) {
       setItems([]);

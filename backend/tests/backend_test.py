@@ -572,7 +572,7 @@ class TestCustomTopics:
         assert r.status_code == 422, f"expected 422 for short label, got {r.status_code}: {r.text[:200]}"
 
     def test_add_custom_topic_too_long(self, client, auth_headers):
-        long_label = "x" * 49
+        long_label = "x" * 81
         r = client.post(f"{API}/topics/custom", json={"label": long_label}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
         assert r.status_code == 422, f"expected 422 for long label, got {r.status_code}: {r.text[:200]}"
 
@@ -584,7 +584,7 @@ class TestCustomTopics:
         # shape
         for k in ("key", "label_it", "label_en", "custom"):
             assert k in d, f"missing field {k}: {d}"
-        assert d["key"] == "custom-energia-nucleare", f"unexpected key: {d['key']}"
+        assert d["key"] == "custom-topic-energia-nucleare", f"unexpected key: {d['key']}"
         assert d["label_it"] == label
         assert d["custom"] is True
         assert isinstance(d["label_en"], str) and 2 <= len(d["label_en"]) <= 60
@@ -718,3 +718,271 @@ class TestOgImageDate:
         r_og = naked.get(f"{API}/og/{bid}.png", timeout=DEFAULT_TIMEOUT)
         assert r_og.status_code == 200
         assert r_og.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+
+# ---------------- Iteration 6: Digest Frequency ----------------
+class TestDigestFrequency:
+    """PUT /api/digest/preferences supports enabled and frequency; me/full returns digest_frequency."""
+
+    def test_me_full_has_digest_frequency_default(self, client, auth_headers):
+        r = client.get(f"{API}/auth/me/full", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert "digest_frequency" in d, f"digest_frequency missing from /auth/me/full: {d}"
+        assert d["digest_frequency"] in ("daily", "weekly")
+
+    def test_digest_prefs_set_frequency_weekly(self, client, auth_headers):
+        r = client.put(f"{API}/digest/preferences", json={"frequency": "weekly"}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["ok"] is True
+        assert d["digest_frequency"] == "weekly"
+        # persist check
+        r2 = client.get(f"{API}/auth/me/full", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r2.json()["digest_frequency"] == "weekly"
+
+    def test_digest_prefs_set_frequency_daily(self, client, auth_headers):
+        r = client.put(f"{API}/digest/preferences", json={"frequency": "daily"}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        assert r.json()["digest_frequency"] == "daily"
+
+    def test_digest_prefs_legacy_enabled_still_works(self, client, auth_headers):
+        r = client.put(f"{API}/digest/preferences", json={"enabled": True}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["digest_enabled"] is True
+        assert "digest_frequency" in d
+        # cleanup
+        client.put(f"{API}/digest/preferences", json={"enabled": False}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+
+    def test_digest_prefs_combined_enabled_and_frequency(self, client, auth_headers):
+        r = client.put(f"{API}/digest/preferences",
+                       json={"enabled": True, "frequency": "weekly"},
+                       headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["digest_enabled"] is True
+        assert d["digest_frequency"] == "weekly"
+        # cleanup
+        client.put(f"{API}/digest/preferences", json={"enabled": False, "frequency": "daily"},
+                   headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+
+    def test_digest_prefs_invalid_frequency_422(self, client, auth_headers):
+        r = client.put(f"{API}/digest/preferences", json={"frequency": "hourly"},
+                       headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 422
+
+
+# ---------------- Iteration 6: Article Q&A ----------------
+@pytest.fixture(scope="module")
+def qa_briefing_id(client):
+    r = client.post(f"{API}/news/briefing", json={"topic": "Mercati", "language": "it"}, timeout=AI_TIMEOUT)
+    assert r.status_code == 200
+    return r.json()["items"][0]["id"]
+
+
+class TestArticleQA:
+    """POST/GET /api/news/{id}/qa"""
+
+    _qa_id = None
+
+    def test_qa_post_returns_answer(self, client, qa_briefing_id):
+        q = "Quali sono gli effetti principali sui piccoli investitori?"
+        r = client.post(f"{API}/news/{qa_briefing_id}/qa",
+                        json={"question": q}, timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"qa post failed: {r.status_code} {r.text[:400]}"
+        d = r.json()
+        for k in ("id", "briefing_id", "question", "answer", "key_points", "created_at"):
+            assert k in d, f"missing {k}: {d}"
+        assert d["briefing_id"] == qa_briefing_id
+        assert d["question"] == q
+        assert isinstance(d["answer"], str) and len(d["answer"]) > 20, f"answer too short: {d['answer']!r}"
+        assert isinstance(d["key_points"], list)
+        TestArticleQA._qa_id = d["id"]
+
+    def test_qa_get_lists_history(self, client, qa_briefing_id):
+        assert TestArticleQA._qa_id, "prev test must have created a qa"
+        r = client.get(f"{API}/news/{qa_briefing_id}/qa", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        arr = r.json()
+        assert isinstance(arr, list) and len(arr) >= 1
+        assert any(qa["id"] == TestArticleQA._qa_id for qa in arr)
+        # newest first — the created qa should be at or near top
+        assert arr[0]["created_at"] >= arr[-1]["created_at"]
+
+    def test_qa_question_too_short_422(self, client, qa_briefing_id):
+        r = client.post(f"{API}/news/{qa_briefing_id}/qa",
+                        json={"question": "ok"}, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 422, f"expected 422 for short q, got {r.status_code}"
+
+    def test_qa_nonexistent_briefing_404(self, client):
+        r = client.post(f"{API}/news/does-not-exist-xyz/qa",
+                        json={"question": "una domanda valida?"}, timeout=AI_TIMEOUT)
+        assert r.status_code == 404
+
+
+# ---------------- Iteration 6: Debate ----------------
+@pytest.fixture(scope="module")
+def debate_briefing_id(client):
+    r = client.post(f"{API}/news/briefing", json={"topic": "Geopolitica", "language": "it"}, timeout=AI_TIMEOUT)
+    assert r.status_code == 200
+    return r.json()["items"][0]["id"]
+
+
+class TestDebate:
+    """POST /api/news/{id}/debate (cache + refresh)."""
+
+    def test_debate_returns_3_sides_with_arguments(self, client, debate_briefing_id):
+        r = client.post(f"{API}/news/{debate_briefing_id}/debate", timeout=AI_TIMEOUT + 60)
+        assert r.status_code == 200, f"debate failed: {r.status_code} {r.text[:400]}"
+        d = r.json()
+        for k in ("briefing_id", "sides", "synthesis", "language", "generated_at"):
+            assert k in d, f"missing {k}: {d.keys()}"
+        assert d["briefing_id"] == debate_briefing_id
+        sides = d["sides"]
+        assert isinstance(sides, list) and len(sides) == 3, f"expected 3 sides, got {len(sides)}"
+        for i, s in enumerate(sides):
+            for k in ("persona", "stance", "arguments"):
+                assert k in s, f"side {i} missing {k}"
+            assert isinstance(s["persona"], str) and len(s["persona"]) > 2
+            assert isinstance(s["stance"], str) and len(s["stance"]) > 3
+            assert isinstance(s["arguments"], list)
+            assert len(s["arguments"]) >= 3, f"side {i} has only {len(s['arguments'])} arguments"
+        assert isinstance(d["synthesis"], str) and len(d["synthesis"]) > 20
+
+    def test_debate_cache_returns_same(self, client, debate_briefing_id):
+        # first call (may have already generated in prev test)
+        t0 = time.time()
+        r1 = client.post(f"{API}/news/{debate_briefing_id}/debate", timeout=AI_TIMEOUT + 60)
+        t1 = time.time() - t0
+        assert r1.status_code == 200
+        gen1 = r1.json()["generated_at"]
+
+        # second call, no refresh — must be cached
+        t0 = time.time()
+        r2 = client.post(f"{API}/news/{debate_briefing_id}/debate", timeout=DEFAULT_TIMEOUT)
+        t2 = time.time() - t0
+        assert r2.status_code == 200
+        gen2 = r2.json()["generated_at"]
+        assert gen1 == gen2, f"cache returned different generated_at: {gen1} vs {gen2}"
+        assert t2 < 5, f"cached call took {t2:.1f}s"
+
+    def test_debate_refresh_true_regenerates(self, client, debate_briefing_id):
+        r1 = client.post(f"{API}/news/{debate_briefing_id}/debate", timeout=AI_TIMEOUT + 60)
+        assert r1.status_code == 200
+        gen1 = r1.json()["generated_at"]
+        # small delay to guarantee different timestamp
+        time.sleep(1.2)
+        r2 = client.post(f"{API}/news/{debate_briefing_id}/debate?refresh=true", timeout=AI_TIMEOUT + 60)
+        assert r2.status_code == 200
+        gen2 = r2.json()["generated_at"]
+        assert gen1 != gen2, f"refresh=true did not regenerate (same generated_at): {gen1}"
+
+    def test_debate_nonexistent_404(self, client):
+        r = client.post(f"{API}/news/nope-xyz/debate", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 404
+
+
+# ---------------- Iteration 6: Custom Topic Kinds ----------------
+class TestCustomTopicKinds:
+    """POST /topics/custom with kind + source, and POST /news/briefing with kind."""
+
+    _added_keys = []
+
+    def test_add_kind_person(self, client, auth_headers):
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": "Elon Musk", "kind": "person"},
+                        headers=auth_headers, timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"person kind: {r.status_code} {r.text[:300]}"
+        d = r.json()
+        assert d["kind"] == "person"
+        assert d["key"].startswith("custom-person-"), f"unexpected key: {d['key']}"
+        assert d["label_it"] == "Elon Musk"
+        TestCustomTopicKinds._added_keys.append(d["key"])
+
+    def test_add_kind_telegram_with_source(self, client, auth_headers):
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": "Ucraina Live", "kind": "telegram", "source": "@ukrainelive"},
+                        headers=auth_headers, timeout=AI_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["kind"] == "telegram"
+        assert d["source"] == "@ukrainelive"
+        assert d["key"].startswith("custom-telegram-"), f"unexpected key: {d['key']}"
+        TestCustomTopicKinds._added_keys.append(d["key"])
+
+    def test_add_kind_hashtag(self, client, auth_headers):
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": "climatechange", "kind": "hashtag"},
+                        headers=auth_headers, timeout=AI_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["kind"] == "hashtag"
+        assert d["key"].startswith("custom-hashtag-")
+        TestCustomTopicKinds._added_keys.append(d["key"])
+
+    def test_add_kind_channel(self, client, auth_headers):
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": "Byoblu", "kind": "channel", "source": "youtube.com/byoblu"},
+                        headers=auth_headers, timeout=AI_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["kind"] == "channel"
+        assert d["source"] == "youtube.com/byoblu"
+        assert d["key"].startswith("custom-channel-")
+        TestCustomTopicKinds._added_keys.append(d["key"])
+
+    def test_add_kind_topic_default(self, client, auth_headers):
+        r = client.post(f"{API}/topics/custom",
+                        json={"label": "Fusione nucleare", "kind": "topic"},
+                        headers=auth_headers, timeout=AI_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["kind"] == "topic"
+        assert d["key"].startswith("custom-topic-")
+        TestCustomTopicKinds._added_keys.append(d["key"])
+
+    def test_topics_mine_includes_kind_and_source(self, client, auth_headers):
+        r = client.get(f"{API}/topics/mine", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        arr = r.json()
+        by_key = {t["key"]: t for t in arr}
+        for k in TestCustomTopicKinds._added_keys:
+            assert k in by_key, f"added key missing: {k}"
+            assert "kind" in by_key[k]
+        # telegram one has source
+        tg = next((t for t in arr if t["kind"] == "telegram"), None)
+        assert tg is not None
+        assert tg["source"] == "@ukrainelive"
+
+    def test_briefing_with_kind_person(self, client):
+        r = client.post(f"{API}/news/briefing",
+                        json={"topic": "Elon Musk", "kind": "person", "language": "it", "refresh": True},
+                        timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"person briefing failed: {r.status_code} {r.text[:400]}"
+        data = r.json()
+        items = data["items"]
+        assert len(items) >= 3
+        joined = " ".join(i["headline"] + " " + i["summary"] for i in items).lower()
+        # The prompt asks about "Elon Musk"; verify person-context reflected by name OR
+        # by one of his well-known ventures (LLM sometimes speaks about him via his companies)
+        person_terms = ["musk", "elon", "tesla", "spacex", "neuralink", "twitter", "xai", " x "]
+        assert any(term in joined for term in person_terms), \
+            f"person context not reflected: {joined[:400]}"
+
+    def test_briefing_with_kind_telegram_source(self, client):
+        r = client.post(f"{API}/news/briefing",
+                        json={"topic": "Ucraina Live", "kind": "telegram", "source": "@ukrainelive",
+                              "language": "it", "refresh": True},
+                        timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"telegram briefing failed: {r.status_code} {r.text[:400]}"
+        items = r.json()["items"]
+        assert len(items) >= 3
+        for it in items[:3]:
+            assert isinstance(it.get("headline"), str) and len(it["headline"]) > 3
+
+    def test_cleanup_kind_topics(self, client, auth_headers):
+        for k in TestCustomTopicKinds._added_keys:
+            r = client.delete(f"{API}/topics/custom/{k}", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
+            assert r.status_code == 200

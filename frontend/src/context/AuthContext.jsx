@@ -48,8 +48,10 @@ export function AuthProvider({ children }) {
     return user;
   };
 
-  const addCustomTopic = async (label) => {
-    const { data } = await api.post("/topics/custom", { label });
+  const addCustomTopic = async (payload) => {
+    // payload can be a string (legacy) or an object {label, kind, source}
+    const body = typeof payload === "string" ? { label: payload } : payload;
+    const { data } = await api.post("/topics/custom", body);
     await fetchMe();
     return data;
   };

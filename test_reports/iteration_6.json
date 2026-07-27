@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 6 testing complete. Backend: extended backend_test.py from 61 → 84 tests. All 23 new iteration-6 tests PASS: TestDigestFrequency (6), TestArticleQA (4), TestDebate (4), TestCustomTopicKinds (9). Test-code changes needed to align existing iter-5 tests to new spec: (a) CustomTopic.label max_length raised 48→80 (updated too_long test to x*81), (b) custom-topic key format changed to `custom-{kind}-{slug}` (updated expected key to `custom-topic-energia-nucleare`). All 84 tests pass when run individually / with -n 0 (verified). Under parallel xdist load with heavy concurrent LLM calls, some tests get transient 20s ReadTimeout on the preview URL — this is Gemini backend queuing, NOT app code. Frontend Playwright verified end-to-end: (1) /profile: kind picker has 5 buttons kind-{topic,person,telegram,hashtag,channel}, all render and switch active state; input placeholder updates when non-topic kind selected; adding label='Elon Musk' kind=person creates pill 'PERSONA · ELON MUSK' with border-dashed styling and remove button data-testid='remove-topic-custom-person-elon-musk'. (2) /profile: digest-frequency-picker has digest-freq-daily + digest-freq-weekly; clicking each triggers PUT /digest/preferences with frequency payload and sets bg-foreground active class. (3) On homepage each NewsItem has both approfondisci-btn-{id} AND debate-btn-{id} (5 each). Clicking debate-btn opens DeepDiveSheet with tab=debate pre-selected (tab-debate active=True immediately). (4) Deep-Dive Sheet has 3 tabs deep-tab-deep, deep-tab-qa, deep-tab-debate. Debate tab loads and renders 3 debate-side-{0,1,2} elements plus synthesis. Q&A tab: typing question into deep-qa-input + clicking deep-qa-submit sends POST /news/{id}/qa and appends qa-item-{id} with AI answer + key points. Approfondisci tab loads deep-dive-content (real_reasons, data_points, context). All LLM AI capabilities verified with real user routes returning meaningful content (Musk briefings mention Neuralink/SpaceX/Tesla/xAI; debate returns 3 personas × 3+ arguments each; Q&A returns 3-5 sentence answers with key_points).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/auth/me/full", "issue": "digest_frequency was NOT included in the response — spec violation (fix applied: added `user.get('digest_frequency', 'daily')`). Was blocking the frontend digest picker from initializing to persisted value."},
+      {"endpoint": "POST /api/news/{id}/qa (validation)", "issue": "The Pydantic 422 for question <3 chars validates length correctly, but does NOT verify the briefing exists first. Order is: validation → briefing lookup → LLM. That's fine, but means a 422 on missing question comes before 404 on missing briefing (a user with both errors sees only 422 — acceptable)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ProfilePage.jsx", "issue": "MISSING useState declarations for newTopicKind/setNewTopicKind, newTopicSource/setNewTopicSource, digestFreq/setDigestFreq. Referenced on lines 31,52,169,173,180-200,275 but never declared. WOULD CRASH the entire profile page with ReferenceError. Fix applied: added the 3 missing useState hooks. Also, newTopicSource has no <input> in the form — the source field is not user-editable in the UI even though the state exists (POST always sends source=null unless user provides it via the label field). Consider adding a separate source input for telegram/channel kinds.", "selector": "/app/frontend/src/pages/ProfilePage.jsx line 19-21", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/profile custom topics", "issues": ["The kind picker has 5 buttons but source_placeholder_{person,telegram,hashtag,channel} placeholders imply the user types the source in the label input — this is confusing. Consider a separate 'source' input that appears when kind requires it (e.g., @channel for telegram)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Consider adding a proper source input for telegram/channel/hashtag kinds in ProfilePage (currently the state exists but no UI field for source)",
+    "Consider bumping DEFAULT_TIMEOUT in backend_test.py to 45s for endpoints that trigger LLM translation (topics/custom) to reduce flakiness under parallel xdist load",
+    "The bulletproof-regression requirement was met after test-code aligns to new iter-6 spec (max_length 80, key prefix custom-{kind}-). Consider migrating existing user documents with custom-{slug} keys to custom-topic-{slug} to preserve preferences_topics pointers."
+  ],
+  "critical_code_review_comments": [
+    "ProfilePage.jsx: had 6 undeclared state variables referenced (newTopicKind, setNewTopicKind, newTopicSource, setNewTopicSource, digestFreq, setDigestFreq). This is a critical oversight — the code would ReferenceError on first render, making /profile completely broken. Fixed by adding useState hooks. Root cause: main agent added JSX using new state without adding the useState declarations.",
+    "server.py me_full: was missing digest_frequency in the response per iter-6 spec. Frontend already reads data.digest_frequency (with fallback 'daily') so the frontend would silently default; but persisted user selections would not survive page refresh. Fixed by adding user.get('digest_frequency', 'daily').",
+    "server.py generate_briefing: `kind='telegram'` prompt includes literal 'canale telegram' and source — good, but the LLM has no real-time access to Telegram content. The prompt correctly instructs the model to indicate it's reporting on affini topics. However, expected_real_output claim ('kind-specific briefings mention the channel context in headlines/summaries') is only partially satisfied — the LLM may or may not surface the source name explicitly.",
+    "server.py debate endpoint: cache key is briefing_id only (no language variant). If a user switches language on a briefing that was originally IT, the debate will remain in IT. Consider caching per (briefing_id, language) pair.",
+    "server.py article_qas: no per-user isolation — any user (auth'd or not — the endpoint is unauth'd!) can GET/POST QAs to any briefing_id. This is by design (public briefings are shared) but consider (a) requiring auth for POST to attribute questions, and (b) hiding answers containing personal context. Currently the endpoint is completely open — a bot could spam.",
+    "server.py: file is now 1125 lines. Long overdue split into routers/{news,qa,debate,digest,topics}.py per iter-5 review.",
+    "DeepDiveSheet.jsx: the useEffect that loads Q&A only re-runs on tab change, not on submitting a new Q&A — but submitQa manually prepends to setQas so the UX works. However if the same briefing is opened again after closing, the qas state does NOT reset (state persists across NewsItem instances since it's inside the same Sheet component). Consider clearing qas/debate state when item.id changes.",
+    "NewsItem.jsx: DeepDiveSheet is instantiated per NewsItem — with 5+ items per page, this creates 5+ Sheet instances (each with their own state, effects). Acceptable but wasteful. Consider a single top-level Sheet driven by a shared context.",
+    "ProfilePage.jsx: renders custom_topics from user context but this doesn't reload after adding a topic unless AuthContext.fetchMe() is called. Verify that addCustomTopic() calls fetchMe internally.",
+    "generate_briefing: prompt still uses IT language regardless of kind — for English users with kind=person the focus text is Italian ('notizie recenti che riguardano la persona'). Should switch focus text based on `language`."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/server.py",
+    "/app/frontend/src/pages/ProfilePage.jsx"
+  ],
+  "success_rate": {
+    "backend": "100% (84/84 tests pass individually / with -n 0; under -n 2 xdist parallel load 7 flaky tests due to LLM concurrency timeouts, retry passes)",
+    "frontend": "100% — all iteration-6 flows verified: digest frequency picker, kind picker with 5 kinds, debate button, 3-tab Deep Dive Sheet (deep/qa/debate), Q&A submission, kind-labeled pills (PERSONA · ELON MUSK)"
+  },
+  "test_credentials": "Backend tests create per-run unique users (test+<ts>_<uuid>@lume.dev / LumeTest2026!). Frontend Playwright: test.iter6.<ts>@lume.dev and test.iter6b.<ts>@lume.dev / LumeTest2026!.",
+  "seed_data_creation": "None. Each test class creates its own briefings via POST /news/briefing (topics 'Mercati', 'Geopolitica' etc.) and cleans up custom topics via DELETE in test_cleanup_kind_topics.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py is now 985 lines with 84 tests across TestBasic, TestAuth, TestNews, TestSaved, TestExplain, TestRss, TestTts, TestPublic, TestPublicViews, TestOgImage, TestDigest, TestCustomTopics, TestOgImageDate + iter-6 additions TestDigestFrequency (6), TestArticleQA (4), TestDebate (4), TestCustomTopicKinds (9). Iter-6 changed CustomTopic model max_length 48→80 and key format to custom-{kind}-{slug}. Two coding bugs were fixed inline: (1) ProfilePage.jsx missing 3 useState hooks (would crash /profile), (2) me_full missing digest_frequency in response. Both fixed and verified. Scheduler now has two cron jobs (daily 08:00 + weekly Monday 08:00) per startup log 'Scheduler started (daily 08:00, weekly Mon 08:00 Europe/Rome)'. Under -n 2 xdist parallel test runs, some LLM-heavy tests may timeout on preview URL — retry with -n 0 or per-class if this happens.",
+  "rca of the issue": "Two coding bugs found and fixed: (A) ProfilePage.jsx referenced 6 state vars (newTopicKind/setNewTopicKind, newTopicSource/setNewTopicSource, digestFreq/setDigestFreq) that were NEVER declared with useState — this would throw ReferenceError on component mount and completely break /profile. Root cause: main agent added JSX consuming new state without adding the useState declarations. Fix: added 3 useState hooks with sensible defaults (newTopicKind='topic', newTopicSource='', digestFreq='daily'). (B) server.py /api/auth/me/full endpoint did not include digest_frequency in response, violating iter-6 spec 'GET /api/auth/me/full returns digest_frequency (default daily)'. Frontend read data.digest_frequency with fallback 'daily' — so newly-set weekly preferences would not persist across page refreshes on the client. Fix: added digest_frequency: user.get('digest_frequency', 'daily') to me_full return dict."
+}

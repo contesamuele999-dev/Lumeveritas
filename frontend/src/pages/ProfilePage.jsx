@@ -17,6 +17,9 @@ export default function ProfilePage() {
   const [digest, setDigest] = useState(false);
   const [sendingNow, setSendingNow] = useState(false);
   const [newTopicLabel, setNewTopicLabel] = useState("");
+  const [newTopicKind, setNewTopicKind] = useState("topic");
+  const [newTopicSource, setNewTopicSource] = useState("");
+  const [digestFreq, setDigestFreq] = useState("daily");
   const [addingTopic, setAddingTopic] = useState(false);
 
   useEffect(() => {
@@ -26,7 +29,10 @@ export default function ProfilePage() {
   useEffect(() => {
     if (user) {
       setSelected(user.preferred_topics || []);
-      api.get("/auth/me/full").then(({ data }) => setDigest(!!data.digest_enabled)).catch(() => {});
+      api.get("/auth/me/full").then(({ data }) => {
+        setDigest(!!data.digest_enabled);
+        setDigestFreq(data.digest_frequency || "daily");
+      }).catch(() => {});
     }
   }, [user]);
 
@@ -37,6 +43,17 @@ export default function ProfilePage() {
       await api.put("/digest/preferences", { enabled: next });
       setDigest(next);
       toast.success(next ? t(lang, "digest_enable") : t(lang, "digest_disable"));
+    } catch (e) {
+      toast.error(t(lang, "error_generic"));
+    } finally { setBusy(false); }
+  };
+
+  const changeFrequency = async (freq) => {
+    setBusy(true);
+    try {
+      await api.put("/digest/preferences", { frequency: freq });
+      setDigestFreq(freq);
+      toast.success(t(lang, "prefs_saved"));
     } catch (e) {
       toast.error(t(lang, "error_generic"));
     } finally { setBusy(false); }
@@ -152,32 +169,63 @@ export default function ProfilePage() {
             if (!label) return;
             setAddingTopic(true);
             try {
-              await addCustomTopic(label);
+              await addCustomTopic({ label, kind: newTopicKind, source: newTopicSource.trim() || null });
               toast.success(t(lang, "topic_added"));
               setNewTopicLabel("");
+              setNewTopicSource("");
+              setNewTopicKind("topic");
             } catch (err) {
               toast.error(err?.response?.data?.detail || t(lang, "error_generic"));
             } finally { setAddingTopic(false); }
           }}
-          className="flex items-stretch border border-foreground bg-background max-w-2xl mb-5 h-14"
+          className="space-y-3 max-w-2xl mb-5"
         >
-          <input
-            data-testid="add-topic-input"
-            value={newTopicLabel}
-            onChange={(e) => setNewTopicLabel(e.target.value)}
-            placeholder={t(lang, "add_topic_placeholder")}
-            maxLength={48}
-            className="flex-1 bg-transparent outline-none px-4 text-base"
-          />
-          <button
-            type="submit"
-            disabled={addingTopic || !newTopicLabel.trim()}
-            data-testid="add-topic-btn"
-            className="px-5 font-mono-caps bg-foreground text-background hover:bg-accent transition-colors flex items-center gap-2 disabled:opacity-60"
-          >
-            {addingTopic ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            {t(lang, "add_topic_btn")}
-          </button>
+          <div className="flex flex-wrap gap-2" data-testid="topic-kind-picker">
+            {[
+              { k: "topic", label: t(lang, "kind_topic") },
+              { k: "person", label: t(lang, "kind_person") },
+              { k: "telegram", label: t(lang, "kind_telegram") },
+              { k: "hashtag", label: t(lang, "kind_hashtag") },
+              { k: "channel", label: t(lang, "kind_channel") },
+            ].map((opt) => (
+              <button
+                type="button"
+                key={opt.k}
+                data-testid={`kind-${opt.k}`}
+                onClick={() => setNewTopicKind(opt.k)}
+                className={`h-10 px-4 border font-mono-caps text-xs transition-colors ${
+                  newTopicKind === opt.k ? "bg-foreground text-background border-foreground" : "border-border hover:border-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-stretch border border-foreground bg-background h-14">
+            <input
+              data-testid="add-topic-input"
+              value={newTopicLabel}
+              onChange={(e) => setNewTopicLabel(e.target.value)}
+              placeholder={
+                newTopicKind === "person" ? t(lang, "source_placeholder_person") :
+                newTopicKind === "telegram" ? t(lang, "source_placeholder_telegram") :
+                newTopicKind === "hashtag" ? t(lang, "source_placeholder_hashtag") :
+                newTopicKind === "channel" ? t(lang, "source_placeholder_channel") :
+                t(lang, "add_topic_placeholder")
+              }
+              maxLength={80}
+              className="flex-1 bg-transparent outline-none px-4 text-base"
+            />
+            <button
+              type="submit"
+              disabled={addingTopic || !newTopicLabel.trim()}
+              data-testid="add-topic-btn"
+              className="px-5 font-mono-caps bg-foreground text-background hover:bg-accent transition-colors flex items-center gap-2 disabled:opacity-60"
+            >
+              {addingTopic ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {t(lang, "add_topic_btn")}
+            </button>
+          </div>
         </form>
 
         {(user?.custom_topics || []).length > 0 && (
@@ -185,6 +233,8 @@ export default function ProfilePage() {
             {user.custom_topics.map((ct) => (
               <div key={ct.key} className="h-11 pl-4 pr-2 border border-dashed border-foreground font-mono-caps flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block" />
+                <span className="text-[10px] text-muted-foreground">{t(lang, `kind_${ct.kind || "topic"}`)}</span>
+                <span>·</span>
                 <span>{lang === "it" ? ct.label_it : ct.label_en}</span>
                 <button
                   data-testid={`remove-topic-${ct.key}`}
@@ -213,6 +263,26 @@ export default function ProfilePage() {
         </div>
         <h2 className="font-serif-display text-2xl md:text-3xl mb-2">{t(lang, "digest_title")}</h2>
         <p className="text-base text-foreground/80 max-w-2xl mb-5">{t(lang, "digest_desc")}</p>
+        <div className="mb-5">
+          <div className="font-mono-caps text-muted-foreground text-[11px] mb-2">{t(lang, "frequency_label")}</div>
+          <div className="flex gap-2" data-testid="digest-frequency-picker">
+            {[
+              { k: "daily", label: t(lang, "freq_daily") },
+              { k: "weekly", label: t(lang, "freq_weekly") },
+            ].map((opt) => (
+              <button
+                key={opt.k}
+                data-testid={`digest-freq-${opt.k}`}
+                onClick={() => changeFrequency(opt.k)}
+                className={`h-11 px-4 border font-mono-caps text-xs ${
+                  digestFreq === opt.k ? "bg-foreground text-background border-foreground" : "border-border hover:border-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex flex-wrap gap-3">
           <button
             data-testid="digest-toggle-btn"
