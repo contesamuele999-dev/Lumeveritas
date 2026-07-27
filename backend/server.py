@@ -555,7 +555,7 @@ async def debate(briefing_id: str, refresh: bool = False):
     if not doc:
         raise HTTPException(status_code=404, detail="Notizia non trovata")
     if not refresh:
-        cached = await db.debates.find_one({"briefing_id": briefing_id}, {"_id": 0})
+        cached = await db.debates.find_one({"briefing_id": briefing_id, "language": {"$in": [None, doc.get("language", "it")]}}, {"_id": 0})
         if cached:
             return DebateOut(**cached)
     language = doc.get("language", "it")
@@ -589,7 +589,7 @@ Solo JSON."""
         language=language,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
-    await db.debates.update_one({"briefing_id": briefing_id}, {"$set": out.model_dump()}, upsert=True)
+    await db.debates.update_one({"briefing_id": briefing_id, "language": out.language}, {"$set": out.model_dump()}, upsert=True)
     return out
 
 # --- WORD / TERM EXPLAIN ---

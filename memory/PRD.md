@@ -11,16 +11,18 @@ User wants a fast, functional web app that collects the newest, verified, deeply
 
 ## Implemented (Feb 2026)
 - JWT auth, topic catalog (16 default), user preferences
-- **Custom topics**: users can add up to 30 personalized topics; auto-translated EN label via Gemini; appears in home pills with dashed border + accent dot. Backend: POST/GET/DELETE `/api/topics/custom`, `/api/topics/mine`, exposed via `/api/auth/me/full.custom_topics`.
+- **Custom topics with kind**: users can add up to 30 personalized channels — Argomento, Persona, Telegram, Hashtag, Altro canale. Each stores kind + optional source. Briefing prompt adapts based on kind.
 - AI briefings (5/topic, 6h cache) via Gemini 3 Flash; deep-dive; free-form Ask
+- **Article-specific Q&A** (`POST /api/news/{id}/qa`) — chat-like follow-ups inside the Deep Dive sheet, stored in article_qas
+- **Virtual expert debate** (`POST /api/news/{id}/debate`) — 3 personas with contrasting views + synthesis, cached per (briefing_id, language)
+- **Deep Dive Sheet with tabs**: Approfondisci · Domande · Dibattito
 - Save / unsave briefings
-- Click-a-word explain (Popover + cache)
-- Daily email digest via Resend (APScheduler cron 08:00 Europe/Rome) + manual send-now
-- RSS live feeds from 20+ independent sources per topic
-- Audio TTS (OpenAI tts-1, nova/alloy) with Mongo mp3 cache
-- Public shareable URLs `/s/:id` with **views counter** + **dynamic OG image** (1200x630 PNG via Pillow) + full Open Graph + Twitter Card via react-helmet-async
+- Click-a-word explain
+- **Digest email** via Resend with frequency picker (daily 08:00 / weekly Monday 08:00 Europe/Rome) + manual send-now
+- RSS live feeds (20+ independent sources)
+- Audio TTS (OpenAI tts-1) with mp3 cache
+- Public shareable URLs `/s/:id` with views counter + dynamic OG image
 - Full IT/EN i18n, Light/Dark theme, editorial Newsreader + Manrope + JetBrains Mono
-- Graceful 429/502 handling for Gemini + Resend + TTS
 
 ## User Personas
 - Curious non-technical adult wanting alternative news

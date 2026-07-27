@@ -208,9 +208,9 @@ export default function ProfilePage() {
               onChange={(e) => setNewTopicLabel(e.target.value)}
               placeholder={
                 newTopicKind === "person" ? t(lang, "source_placeholder_person") :
-                newTopicKind === "telegram" ? t(lang, "source_placeholder_telegram") :
-                newTopicKind === "hashtag" ? t(lang, "source_placeholder_hashtag") :
-                newTopicKind === "channel" ? t(lang, "source_placeholder_channel") :
+                newTopicKind === "telegram" ? "Nome del canale (es. Novecento News)" :
+                newTopicKind === "hashtag" ? "Nome hashtag (es. climatechange)" :
+                newTopicKind === "channel" ? "Nome del canale" :
                 t(lang, "add_topic_placeholder")
               }
               maxLength={80}
@@ -226,6 +226,20 @@ export default function ProfilePage() {
               {t(lang, "add_topic_btn")}
             </button>
           </div>
+          {["telegram", "hashtag", "channel"].includes(newTopicKind) && (
+            <input
+              data-testid="add-topic-source"
+              value={newTopicSource}
+              onChange={(e) => setNewTopicSource(e.target.value)}
+              placeholder={
+                newTopicKind === "telegram" ? t(lang, "source_placeholder_telegram") :
+                newTopicKind === "hashtag" ? t(lang, "source_placeholder_hashtag") :
+                t(lang, "source_placeholder_channel")
+              }
+              maxLength={200}
+              className="w-full h-12 mt-2 px-4 border border-border bg-background focus:border-foreground outline-none text-sm text-foreground/85"
+            />
+          )}
         </form>
 
         {(user?.custom_topics || []).length > 0 && (
