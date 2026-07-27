@@ -1,0 +1,138 @@
+import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { useLang } from "@/context/LangContext";
+import { useAuth } from "@/context/AuthContext";
+import { t } from "@/lib/i18n";
+import { Sun, Moon, LogIn, LogOut, User, Bookmark, Home, MessageCircleQuestion, Globe } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+export default function AppShell() {
+  const { lang, setLang, theme, setTheme } = useLang();
+  const { user, logout } = useAuth();
+  const nav = useNavigate();
+
+  const links = [
+    { to: "/", label: t(lang, "home"), icon: Home, testid: "nav-home" },
+    { to: "/ask", label: t(lang, "ask"), icon: MessageCircleQuestion, testid: "nav-ask" },
+    { to: "/saved", label: t(lang, "saved"), icon: Bookmark, testid: "nav-saved" },
+    { to: "/profile", label: t(lang, "profile"), icon: User, testid: "nav-profile" },
+  ];
+
+  return (
+    <div className="App min-h-screen grain relative">
+      {/* HEADER */}
+      <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border">
+        <div className="max-w-[1400px] mx-auto px-5 md:px-10 py-4 flex items-center gap-6">
+          <button
+            data-testid="brand-home-btn"
+            onClick={() => nav("/")}
+            className="flex items-center gap-3 group"
+          >
+            <div className="w-10 h-10 bg-foreground text-background flex items-center justify-center font-serif-display text-xl font-semibold">L</div>
+            <div className="hidden sm:block text-left leading-tight">
+              <div className="font-serif-display text-2xl font-semibold tracking-tight">Lume Veritas</div>
+              <div className="font-mono-caps text-muted-foreground">{t(lang, "tagline")}</div>
+            </div>
+          </button>
+
+          <div className="flex-1" />
+
+          <div className="hidden md:flex items-center gap-1">
+            <button
+              data-testid="lang-toggle-btn"
+              onClick={() => setLang(lang === "it" ? "en" : "it")}
+              className="flex items-center gap-2 px-3 h-11 border border-border hover:bg-secondary transition-colors font-mono-caps"
+              title={t(lang, "lang_label")}
+            >
+              <Globe className="w-4 h-4" />
+              {lang.toUpperCase()}
+            </button>
+            <button
+              data-testid="theme-toggle-btn"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="flex items-center justify-center w-11 h-11 border border-border hover:bg-secondary transition-colors"
+              title={t(lang, "theme_label")}
+            >
+              {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+          </div>
+
+          {user ? (
+            <Button
+              data-testid="header-logout-btn"
+              variant="ghost"
+              onClick={() => { logout(); nav("/"); }}
+              className="hidden md:inline-flex h-11"
+            >
+              <LogOut className="w-4 h-4 mr-2" /> {t(lang, "logout")}
+            </Button>
+          ) : (
+            <Button
+              data-testid="header-login-btn"
+              onClick={() => nav("/login")}
+              className="hidden md:inline-flex h-11 bg-foreground text-background hover:bg-foreground/90"
+            >
+              <LogIn className="w-4 h-4 mr-2" /> {t(lang, "login")}
+            </Button>
+          )}
+        </div>
+
+        {/* Desktop tab-bar */}
+        <nav className="hidden md:block border-t border-border">
+          <div className="max-w-[1400px] mx-auto px-10 flex items-center gap-0">
+            {links.map((l) => (
+              <NavLink
+                key={l.to}
+                to={l.to}
+                data-testid={l.testid}
+                className={({ isActive }) =>
+                  `font-mono-caps px-5 py-4 border-r border-border hover:bg-secondary transition-colors flex items-center gap-2 ${
+                    isActive ? "bg-foreground text-background hover:bg-foreground" : ""
+                  }`
+                }
+              >
+                <l.icon className="w-4 h-4" />
+                {l.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      </header>
+
+      {/* MAIN */}
+      <main className="max-w-[1400px] mx-auto px-5 md:px-10 py-8 md:py-12 relative z-10">
+        <Outlet />
+      </main>
+
+      {/* MOBILE BOTTOM NAV */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-background border-t border-border grid grid-cols-4">
+        {links.map((l) => (
+          <NavLink
+            key={l.to}
+            to={l.to}
+            data-testid={`mobile-${l.testid}`}
+            className={({ isActive }) =>
+              `flex flex-col items-center justify-center py-3 gap-1 font-mono-caps ${
+                isActive ? "text-accent" : "text-muted-foreground"
+              }`
+            }
+          >
+            <l.icon className="w-5 h-5" />
+            <span className="text-[10px]">{l.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="md:hidden h-20" />
+
+      {/* Footer */}
+      <footer className="border-t border-border mt-16 py-8 max-w-[1400px] mx-auto px-5 md:px-10 relative z-10">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          <div className="font-mono-caps text-muted-foreground">Lume Veritas — {new Date().getFullYear()}</div>
+          <div className="text-sm text-muted-foreground max-w-xl">
+            {t(lang, "no_data_note")}
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
