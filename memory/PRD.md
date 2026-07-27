@@ -10,20 +10,17 @@ User wants a fast, functional web app that collects the newest, verified, deeply
 - Frontend: React 19 + Tailwind + Shadcn + Framer Motion + sonner + react-router
 
 ## Implemented (Feb 2026)
-- JWT auth: register, login, /auth/me, update preferences
-- Topic catalog (16 topics, IT + EN labels)
-- AI news briefings (5 items per topic), cached 6h in Mongo
-- Deep-dive endpoint (real reasons, data points, context)
-- Free-form Ask endpoint (structured JSON answer)
-- Save / unsave briefings per user
-- Click-a-word to explain (Popover + cache)
-- **Daily email digest** via Resend, APScheduler cron 08:00 Europe/Rome. Manual "Send now" from profile. Graceful ok:false JSON on Resend failure so client sees a real actionable message (free-tier limitation).
-- **RSS live feed** from 20+ curated alternative/independent sources per topic (ScienceDaily, Consortium News, MoonOfAlabama, Common Dreams, Cointelegraph, Ars Technica, OurWorldInData, Pew Research, Gallup, etc.)
-- **Audio TTS** with OpenAI TTS (tts-1, voices nova/alloy) for briefings; cached mp3 per briefing in Mongo. Player state machine (idle/loading/playing/paused).
-- **Public shareable URLs** `/s/:id` — no auth required, auto-triggers deep-dive if missing, includes ClickableText + AudioButton + ShareButton.
-- Graceful 429 handling for Gemini + Retry button in AskPage
-- SheetDescription sr-only for a11y
+- JWT auth, topic catalog (16 default), user preferences
+- **Custom topics**: users can add up to 30 personalized topics; auto-translated EN label via Gemini; appears in home pills with dashed border + accent dot. Backend: POST/GET/DELETE `/api/topics/custom`, `/api/topics/mine`, exposed via `/api/auth/me/full.custom_topics`.
+- AI briefings (5/topic, 6h cache) via Gemini 3 Flash; deep-dive; free-form Ask
+- Save / unsave briefings
+- Click-a-word explain (Popover + cache)
+- Daily email digest via Resend (APScheduler cron 08:00 Europe/Rome) + manual send-now
+- RSS live feeds from 20+ independent sources per topic
+- Audio TTS (OpenAI tts-1, nova/alloy) with Mongo mp3 cache
+- Public shareable URLs `/s/:id` with **views counter** + **dynamic OG image** (1200x630 PNG via Pillow) + full Open Graph + Twitter Card via react-helmet-async
 - Full IT/EN i18n, Light/Dark theme, editorial Newsreader + Manrope + JetBrains Mono
+- Graceful 429/502 handling for Gemini + Resend + TTS
 
 ## User Personas
 - Curious non-technical adult wanting alternative news

@@ -139,10 +139,9 @@ export default function ProfilePage() {
       </section>
 
       <section>
-        <div className="flex items-center gap-2 font-mono-caps text-accent mb-2">
-          <Sparkles className="w-4 h-4" /> {t(lang, "custom_topics_title")}
-        </div>
-        <h2 className="font-serif-display text-2xl md:text-3xl mb-2">{t(lang, "custom_topics_title")}</h2>
+        <h2 className="font-serif-display text-2xl md:text-3xl mb-2 flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-accent" /> {t(lang, "custom_topics_title")}
+        </h2>
         <p className="text-base text-foreground/80 max-w-2xl mb-5">{t(lang, "custom_topics_desc")}</p>
 
         <form

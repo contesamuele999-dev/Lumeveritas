@@ -258,9 +258,13 @@ async def get_my_topics(user = Depends(require_user)):
 @api.post("/topics/custom", response_model=CustomTopic)
 async def add_custom_topic(inp: CustomTopicIn, user = Depends(require_user)):
     label = inp.label.strip()
+    if len(label) < 2:
+        raise HTTPException(status_code=400, detail="Etichetta troppo corta")
     key = f"custom-{_slugify(label)}"
     doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "custom_topics": 1, "preferred_topics": 1})
     existing = (doc or {}).get("custom_topics", [])
+    if len(existing) >= 30:
+        raise HTTPException(status_code=400, detail="Hai raggiunto il limite di 30 argomenti personalizzati")
     # dedupe by key
     if any(t.get("key") == key for t in existing):
         for t in existing:
