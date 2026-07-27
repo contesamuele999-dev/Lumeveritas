@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import DeepDiveSheet from "@/components/DeepDiveSheet";
+import ClickableText from "@/components/ClickableText";
 
 export default function NewsItem({ item, featured = false, onSaveToggle, initiallySaved = false }) {
   const { lang } = useLang();
@@ -46,11 +47,11 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
         <span className="tabular">{new Date(item.generated_at).toLocaleDateString(lang === "it" ? "it-IT" : "en-US")}</span>
       </div>
       <h3 className={`font-serif-display leading-[1.05] tracking-tight mb-4 ${featured ? "text-4xl md:text-6xl" : "text-2xl md:text-3xl"}`}>
-        {item.headline}
+        <ClickableText text={item.headline} contextText={item.summary} />
       </h3>
-      <p className={`text-foreground/85 ${featured ? "text-lg md:text-xl max-w-3xl" : "text-base md:text-lg max-w-2xl"} leading-relaxed`}>
-        {item.summary}
-      </p>
+      <div className={`text-foreground/85 ${featured ? "text-lg md:text-xl max-w-3xl" : "text-base md:text-lg max-w-2xl"} leading-relaxed`}>
+        <ClickableText text={item.summary} />
+      </div>
 
       {item.key_facts?.length > 0 && (
         <ul className="mt-5 space-y-2 max-w-2xl">

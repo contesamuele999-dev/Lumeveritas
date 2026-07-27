@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import ClickableText from "@/components/ClickableText";
 import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
@@ -38,8 +39,13 @@ export default function DeepDiveSheet({ item, open, onOpenChange }) {
             <SheetTitle className="font-serif-display text-3xl md:text-4xl leading-tight tracking-tight">
               {data?.headline}
             </SheetTitle>
+            <SheetDescription className="sr-only">
+              {t(lang, "approfondisci")}: {data?.headline}
+            </SheetDescription>
           </SheetHeader>
-          <p className="mt-4 text-base md:text-lg text-foreground/85 leading-relaxed">{data?.summary}</p>
+          <div className="mt-4 text-base md:text-lg text-foreground/85 leading-relaxed">
+            <ClickableText text={data?.summary} />
+          </div>
         </div>
 
         {loading && (
@@ -55,7 +61,9 @@ export default function DeepDiveSheet({ item, open, onOpenChange }) {
                 <div className="flex items-center gap-2 mb-3 font-mono-caps text-accent">
                   <Landmark className="w-4 h-4" /> {t(lang, "real_reasons")}
                 </div>
-                <p className="text-base md:text-lg leading-relaxed text-foreground/90">{data.real_reasons}</p>
+                <div className="text-base md:text-lg leading-relaxed text-foreground/90">
+                  <ClickableText text={data.real_reasons} />
+                </div>
               </section>
             )}
 
@@ -66,7 +74,9 @@ export default function DeepDiveSheet({ item, open, onOpenChange }) {
                 </div>
                 <ul className="space-y-2 col-rule">
                   {data.data_points.map((d, i) => (
-                    <li key={i} className="pt-2 text-base md:text-lg text-foreground/90">{d}</li>
+                    <li key={i} className="pt-2 text-base md:text-lg text-foreground/90">
+                      <ClickableText text={d} />
+                    </li>
                   ))}
                 </ul>
               </section>
@@ -77,7 +87,9 @@ export default function DeepDiveSheet({ item, open, onOpenChange }) {
                 <div className="flex items-center gap-2 mb-3 font-mono-caps text-accent">
                   <BookOpen className="w-4 h-4" /> {t(lang, "context")}
                 </div>
-                <p className="text-base md:text-lg leading-relaxed text-foreground/90">{data.context}</p>
+                <div className="text-base md:text-lg leading-relaxed text-foreground/90">
+                  <ClickableText text={data.context} />
+                </div>
               </section>
             )}
 

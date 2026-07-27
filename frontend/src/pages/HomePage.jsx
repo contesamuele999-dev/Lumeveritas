@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { t } from "@/lib/i18n";
-import { Loader2, RefreshCcw } from "lucide-react";
+import { Loader2, RefreshCcw, MousePointerClick } from "lucide-react";
 
 export default function HomePage() {
   const { lang } = useLang();
@@ -76,8 +76,11 @@ export default function HomePage() {
             </p>
           </div>
         </div>
-        <div className="mt-8 max-w-3xl">
+        <div className="mt-8 max-w-3xl space-y-2">
           <AskBar big />
+          <div className="font-mono-caps text-muted-foreground text-[11px] flex items-center gap-2">
+            <MousePointerClick className="w-3.5 h-3.5" /> {t(lang, "click_word_hint")}
+          </div>
         </div>
       </section>
 

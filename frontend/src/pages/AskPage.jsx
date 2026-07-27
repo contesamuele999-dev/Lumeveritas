@@ -4,7 +4,8 @@ import { useLang } from "@/context/LangContext";
 import { api } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import AskBar from "@/components/AskBar";
-import { Loader2, Sparkles, AlertTriangle, ListChecks } from "lucide-react";
+import { Loader2, Sparkles, AlertTriangle, ListChecks, RefreshCcw } from "lucide-react";
+import ClickableText from "@/components/ClickableText";
 
 export default function AskPage() {
   const { lang } = useLang();
@@ -13,6 +14,7 @@ export default function AskPage() {
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!q) { setAnswer(null); return; }
@@ -23,13 +25,13 @@ export default function AskPage() {
         const { data } = await api.post("/ask", { question: q, language: lang });
         if (!cancel) setAnswer(data);
       } catch (e) {
-        if (!cancel) setError(t(lang, "error_generic"));
+        if (!cancel) setError(e?.response?.data?.detail || t(lang, "error_generic"));
       } finally {
         if (!cancel) setLoading(false);
       }
     })();
     return () => { cancel = true; };
-  }, [q, lang]);
+  }, [q, lang, attempt]);
 
   return (
     <div className="max-w-4xl space-y-10">
@@ -57,8 +59,17 @@ export default function AskPage() {
           )}
 
           {error && (
-            <div className="text-accent font-mono-caps flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4" /> {error}
+            <div className="border border-accent p-5 space-y-3" data-testid="ask-error">
+              <div className="text-accent font-mono-caps flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" /> {error}
+              </div>
+              <button
+                data-testid="ask-retry-btn"
+                onClick={() => setAttempt((n) => n + 1)}
+                className="h-11 px-4 border border-foreground font-mono-caps flex items-center gap-2 hover:bg-foreground hover:text-background transition-colors"
+              >
+                <RefreshCcw className="w-4 h-4" /> {lang === "it" ? "Riprova" : "Retry"}
+              </button>
             </div>
           )}
 
@@ -68,7 +79,9 @@ export default function AskPage() {
                 <div className="flex items-center gap-2 font-mono-caps text-accent mb-3">
                   <Sparkles className="w-4 h-4" /> {t(lang, "answer")}
                 </div>
-                <p className="text-lg md:text-xl leading-relaxed text-foreground/95">{answer.answer}</p>
+                <div className="text-lg md:text-xl leading-relaxed text-foreground/95">
+                  <ClickableText text={answer.answer} />
+                </div>
               </section>
 
               {answer.key_points?.length > 0 && (

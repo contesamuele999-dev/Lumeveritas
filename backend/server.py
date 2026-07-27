@@ -93,6 +93,15 @@ class AskOut(BaseModel):
 class SaveItemIn(BaseModel):
     briefing_id: str
 
+class ExplainIn(BaseModel):
+    word: str
+    context: Optional[str] = None
+    language: Literal["it", "en"] = "it"
+
+class ExplainOut(BaseModel):
+    word: str
+    explanation: str
+
 # ------------------ AUTH HELPERS ------------------
 def hash_pw(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
@@ -166,10 +175,20 @@ SYSTEM_EN = (
 def sys_for(lang: str) -> str:
     return SYSTEM_IT if lang == "it" else SYSTEM_EN
 
-async def llm_json(session_id: str, system: str, user_text: str) -> dict:
+async def llm_text(session_id: str, system: str, user_text: str) -> str:
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system).with_model("gemini", "gemini-3-flash-preview")
-    resp = await chat.send_message(UserMessage(text=user_text))
-    text = resp if isinstance(resp, str) else str(resp)
+    try:
+        resp = await chat.send_message(UserMessage(text=user_text))
+    except Exception as e:
+        msg = str(e).lower()
+        if "429" in msg or "rate" in msg or "concurrent" in msg or "limit" in msg:
+            raise HTTPException(status_code=429, detail="Il servizio IA è momentaneamente sovraccarico. Riprova tra qualche secondo.")
+        log.error(f"LLM error: {e}")
+        raise HTTPException(status_code=502, detail="Errore dal servizio IA. Riprova.")
+    return resp if isinstance(resp, str) else str(resp)
+
+async def llm_json(session_id: str, system: str, user_text: str) -> dict:
+    text = await llm_text(session_id, system, user_text)
     # try to extract JSON
     start = text.find('{')
     end = text.rfind('}')
@@ -363,6 +382,36 @@ Solo JSON."""
         key_points=data.get("key_points", []) or [],
         caveats=data.get("caveats", []) or [],
     )
+
+# --- WORD / TERM EXPLAIN ---
+@api.post("/explain", response_model=ExplainOut)
+async def explain_word(inp: ExplainIn):
+    word = (inp.word or "").strip()
+    if not word:
+        raise HTTPException(status_code=400, detail="Parola mancante")
+    if len(word) > 120:
+        raise HTTPException(status_code=400, detail="Selezione troppo lunga")
+    # cache 30 days
+    key = f"{inp.language}:{word.lower()}"
+    cached = await db.explanations.find_one({"key": key}, {"_id": 0})
+    if cached:
+        return ExplainOut(word=word, explanation=cached["explanation"])
+    lang_label = "italiano molto semplice, come parlassi a un anziano" if inp.language == "it" else "very simple English, as if explaining to a child"
+    ctx = f"\nContesto in cui appare: \"{inp.context[:400]}\"" if inp.context else ""
+    prompt = f"""Spiega in {lang_label} il significato di questa parola o espressione:
+
+PAROLA: "{word}"{ctx}
+
+Rispondi in massimo 2 frasi (max 45 parole totali). Nessuna introduzione, nessuna citazione. Solo la spiegazione chiara."""
+    session = f"explain-{uuid.uuid4()}"
+    txt = await llm_text(session, sys_for(inp.language), prompt)
+    explanation = txt.strip().strip('"').strip("'")
+    await db.explanations.update_one(
+        {"key": key},
+        {"$set": {"key": key, "word": word, "language": inp.language, "explanation": explanation}},
+        upsert=True,
+    )
+    return ExplainOut(word=word, explanation=explanation)
 
 # --- SAVED ---
 @api.post("/saved/add")

@@ -232,3 +232,55 @@ class TestSaved:
     def test_save_nonexistent_briefing(self, client, auth_headers):
         r = client.post(f"{API}/saved/add", json={"briefing_id": "does-not-exist"}, headers=auth_headers, timeout=DEFAULT_TIMEOUT)
         assert r.status_code == 404
+
+
+# ---------------- Explain (NEW) ----------------
+class TestExplain:
+    """Tests for POST /api/explain (word/term explainer)."""
+
+    def test_explain_it(self, client):
+        r = client.post(f"{API}/explain", json={"word": "idrogeno", "language": "it"}, timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"explain IT failed: {r.status_code} {r.text[:400]}"
+        d = r.json()
+        assert d["word"] == "idrogeno"
+        assert isinstance(d["explanation"], str)
+        assert len(d["explanation"]) > 5, f"explanation too short: {d['explanation']!r}"
+
+    def test_explain_cache(self, client):
+        """Second call with same word+language should return same explanation (cached)."""
+        r1 = client.post(f"{API}/explain", json={"word": "idrogeno", "language": "it"}, timeout=AI_TIMEOUT)
+        assert r1.status_code == 200
+        first = r1.json()["explanation"]
+        t0 = time.time()
+        r2 = client.post(f"{API}/explain", json={"word": "idrogeno", "language": "it"}, timeout=AI_TIMEOUT)
+        elapsed = time.time() - t0
+        assert r2.status_code == 200
+        second = r2.json()["explanation"]
+        assert first == second, "cached explanation differs from first"
+        # Cache should be fast (< 5s round trip)
+        assert elapsed < 5, f"cached response took {elapsed:.1f}s — cache likely not used"
+
+    def test_explain_en(self, client):
+        r = client.post(f"{API}/explain", json={"word": "quorum", "language": "en"}, timeout=AI_TIMEOUT)
+        assert r.status_code == 200, f"explain EN failed: {r.status_code} {r.text[:400]}"
+        d = r.json()
+        assert d["word"] == "quorum"
+        expl = d["explanation"]
+        assert isinstance(expl, str) and len(expl) > 5
+        # Heuristic: English explanation should contain English stopwords or be plainly non-Italian
+        low = expl.lower()
+        assert any(w in low for w in [" the ", " a ", " is ", " to ", " that ", " when ", " of "]) or "quorum" in low, \
+            f"EN explanation may not be in English: {expl[:180]}"
+
+    def test_explain_empty_word_400(self, client):
+        r = client.post(f"{API}/explain", json={"word": "", "language": "it"}, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 400, f"expected 400 for empty word, got {r.status_code}: {r.text}"
+
+    def test_explain_whitespace_only_400(self, client):
+        r = client.post(f"{API}/explain", json={"word": "   ", "language": "it"}, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 400, f"expected 400 for whitespace-only word, got {r.status_code}: {r.text}"
+
+    def test_explain_too_long_400(self, client):
+        long_word = "a" * 121
+        r = client.post(f"{API}/explain", json={"word": long_word, "language": "it"}, timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 400, f"expected 400 for word > 120 chars, got {r.status_code}: {r.text}"
