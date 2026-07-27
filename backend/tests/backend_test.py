@@ -389,6 +389,119 @@ class TestPublic:
         assert r.status_code == 404
 
 
+# ---------------- Public Views Counter (NEW iteration 4) ----------------
+@pytest.fixture(scope="module")
+def fresh_briefing_id(client):
+    """Create a fresh briefing and return an id that has NEVER been publicly fetched."""
+    # Use a distinct topic label so cache from previous tests isn't reused
+    r = client.post(f"{API}/news/briefing", json={"topic": "Statistiche", "language": "it"}, timeout=AI_TIMEOUT)
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert items
+    return items[0]["id"]
+
+
+class TestPublicViews:
+    """Tests for view counter increment and /public/{id}/views endpoint."""
+
+    def test_views_increment_on_public_get(self, client, fresh_briefing_id):
+        bid = fresh_briefing_id
+        naked = requests.Session()
+
+        # get baseline views via dedicated endpoint
+        r0 = naked.get(f"{API}/public/{bid}/views", timeout=DEFAULT_TIMEOUT)
+        assert r0.status_code == 200
+        baseline = int(r0.json()["views"])
+
+        # 3 fetches should bump the counter by 3
+        seen = []
+        for _ in range(3):
+            r = naked.get(f"{API}/public/{bid}", timeout=AI_TIMEOUT)
+            assert r.status_code == 200
+            seen.append(int(r.json().get("views", 0)))
+
+        # each call returns the incremented value (monotonically increasing)
+        assert seen[0] == baseline + 1, f"expected first views={baseline+1}, got {seen[0]}"
+        assert seen[1] == baseline + 2, f"expected second views={baseline+2}, got {seen[1]}"
+        assert seen[2] == baseline + 3, f"expected third views={baseline+3}, got {seen[2]}"
+
+        # dedicated views endpoint matches actual count
+        r_final = naked.get(f"{API}/public/{bid}/views", timeout=DEFAULT_TIMEOUT)
+        assert r_final.status_code == 200
+        assert int(r_final.json()["views"]) == baseline + 3
+
+    def test_views_endpoint_shape(self, client, fresh_briefing_id):
+        r = client.get(f"{API}/public/{fresh_briefing_id}/views", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert set(d.keys()) == {"views"}
+        assert isinstance(d["views"], int)
+        assert d["views"] >= 0
+
+    def test_views_not_found(self, client):
+        r = client.get(f"{API}/public/nonexistent-xyz-views/views", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 404
+
+    def test_briefing_item_has_views_field(self, client, fresh_briefing_id):
+        # regular GET /news/item/{id} must expose views field with int
+        r = client.get(f"{API}/news/item/{fresh_briefing_id}", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200
+        d = r.json()
+        assert "views" in d
+        assert isinstance(d["views"], int)
+
+
+# ---------------- OG Image (NEW iteration 4) ----------------
+LOCAL_API = "http://localhost:8001/api"  # for headers stripped by ingress (Cache-Control)
+
+
+class TestOgImage:
+    """Tests for GET /api/og/{id}.png — Pillow-rendered Open Graph image."""
+
+    PNG_SIG = b"\x89PNG\r\n\x1a\n"
+
+    def test_og_image_valid_id(self, client, fresh_briefing_id):
+        import io as _io
+        from PIL import Image as _Image
+        naked = requests.Session()
+        r = naked.get(f"{API}/og/{fresh_briefing_id}.png", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200, f"og image failed: {r.status_code} {r.text[:200]}"
+        assert r.headers.get("content-type", "").lower().startswith("image/png"), \
+            f"bad content-type: {r.headers.get('content-type')}"
+        # PNG signature + size
+        assert r.content[:8] == self.PNG_SIG, "missing PNG signature"
+        size_kb = len(r.content) / 1024
+        assert 5 <= size_kb <= 200, f"PNG size out of range: {size_kb:.1f} KB"
+        # Dimensions
+        img = _Image.open(_io.BytesIO(r.content))
+        assert img.size == (1200, 630), f"expected 1200x630, got {img.size}"
+        assert img.format == "PNG"
+
+    def test_og_image_fallback_nonexistent(self, client):
+        """Nonexistent id should return 200 with fallback OG image (not 404)."""
+        import io as _io
+        from PIL import Image as _Image
+        r = client.get(f"{API}/og/nonexistent-id-xyz.png", timeout=DEFAULT_TIMEOUT)
+        assert r.status_code == 200, f"expected 200 fallback, got {r.status_code}"
+        assert r.headers.get("content-type", "").lower().startswith("image/png")
+        assert r.content[:8] == self.PNG_SIG
+        img = _Image.open(_io.BytesIO(r.content))
+        assert img.size == (1200, 630)
+        assert len(r.content) > 5 * 1024, f"fallback PNG too small: {len(r.content)}B"
+
+    def test_og_image_cache_header_app_level(self, client, fresh_briefing_id):
+        """Verify the app sets Cache-Control: public, max-age=86400.
+        Note: ingress (Cloudflare) rewrites this header to 'no-store' on public URL,
+        so we must check against localhost:8001 to observe the app-level header."""
+        try:
+            r = requests.get(f"{LOCAL_API}/og/{fresh_briefing_id}.png", timeout=DEFAULT_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            pytest.skip("localhost:8001 not reachable from this env")
+        assert r.status_code == 200
+        assert r.headers.get("cache-control") == "public, max-age=86400", \
+            f"unexpected app-level cache-control: {r.headers.get('cache-control')!r}"
+
+
 # ---------------- Digest (NEW iteration 3) ----------------
 class TestDigest:
     def test_me_full_includes_digest_flag(self, client, auth_headers):
@@ -418,17 +531,18 @@ class TestDigest:
         assert r.status_code == 401
 
     def test_digest_send_now(self, client, auth_headers):
-        """Resend free tier will likely return 403 (unverified recipient) → backend returns 502.
-        Either 200 (ok:true) or 502 is acceptable as long as endpoint is wired."""
+        """Resend free tier only delivers to account owner. Backend now returns 200 with
+        {ok:false, error, message} on Resend rejection instead of 502 (per iter 3 fix)."""
         r = client.post(f"{API}/digest/send-now", headers=auth_headers, timeout=AI_TIMEOUT * 2)
-        assert r.status_code in (200, 502), f"unexpected status: {r.status_code} {r.text[:400]}"
-        if r.status_code == 200:
-            d = r.json()
-            assert d.get("ok") is True
+        assert r.status_code == 200, f"expected 200 always, got {r.status_code}: {r.text[:400]}"
+        d = r.json()
+        assert "ok" in d
+        if d["ok"] is True:
             assert "email" in d
-        # For 502 (Resend free-tier "recipient not verified"), body may be intercepted
-        # by K8s ingress into a generic error page — we still consider endpoint wiring correct
-        # as long as backend logged the Resend error (verified via logs separately).
+        else:
+            # Resend free-tier rejection path
+            assert "error" in d
+            assert "message" in d and isinstance(d["message"], str) and len(d["message"]) > 10
 
     def test_digest_send_now_requires_auth(self, client):
         r = client.post(f"{API}/digest/send-now", timeout=DEFAULT_TIMEOUT)

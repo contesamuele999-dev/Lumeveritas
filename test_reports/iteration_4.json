@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 4 testing complete. Backend: 47/47 pytest cases PASS (100%) — all 40 previous flows still green PLUS 7 new tests: TestPublicViews (increment on GET /public/{id} baseline+1/+2/+3, /views endpoint shape, /views 404, briefing item has views field) and TestOgImage (real PNG 1200x630 with valid PNG signature ~26KB, fallback 200 for nonexistent id, app-level Cache-Control header via localhost). Frontend Playwright verified: /s/:id public page loads without auth, `public-views-counter` renders 'LETTA DA N PERSONE' (uppercase via font-mono-caps) with N matching /api/public/{id}/views, article body renders full deep-dive content, HelmetProvider wrapping does NOT break /, /login, /ask navigation (regression OK). OG image URL returns valid PNG (bytes verified 1200x630, PNG signature 89 50 4E 47). CRITICAL BUG FOUND: react-helmet-async is NOT deduplicating meta tags against the pre-existing tags in /app/frontend/public/index.html. Verified in DOM: 2 `og:title`, 2 `og:description`, 2 `og:type`, 2 `og:site_name`, 3 `name=description` — social scrapers (Facebook/Twitter/LinkedIn) may pick the FIRST occurrence which is the DEFAULT ('Lume Veritas — le notizie che i giornali trascurano') instead of the article headline. og:image/og:url/canonical/article:section/article:published_time work correctly because index.html doesn't define them. NOTE: also observed that Cloudflare ingress rewrites the app-level Cache-Control: public,max-age=86400 to no-store,no-cache on external URL — verified via localhost:8001 that the app sets it correctly. This is an ingress limitation, not an app bug.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/og/{id}.png", "issue": "App correctly sets Cache-Control: public, max-age=86400 (verified via localhost:8001), but Cloudflare/K8s ingress rewrites the response header to 'no-store, no-cache, must-revalidate' on the public URL. This nullifies browser + CDN caching for OG images. Not fixable in app code — infrastructure-level."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "OG / social sharing on /s/:id", "issue": "CRITICAL: react-helmet-async only APPENDS meta tags without removing duplicates. index.html declares default og:title, og:description, og:type, og:site_name, twitter:card, twitter:title, twitter:description and 2× <meta name=description>. When PublicBriefingPage's <Helmet> re-declares them, the DOM ends up with duplicates (2 og:title, 2 og:description, 2 og:type, 2 og:site_name, 3 description). Social scrapers typically read the FIRST occurrence, so previews on Facebook/Twitter/LinkedIn will show the default 'Lume Veritas — le notizie che i giornali trascurano' and the generic description instead of the article headline and summary. Fix: remove the default og:*/twitter:*/description meta tags from /app/frontend/public/index.html (keep only <title> and neutral <meta name=description>), so Helmet is the sole owner of these tags on /s/:id and other pages fall back to whatever remains. Alternatively, keep index.html defaults but change key strategy — however react-helmet-async fundamentally cannot manage pre-existing head elements that weren't rendered by React.", "affected_selectors": ["meta[property=\"og:title\"]", "meta[property=\"og:description\"]", "meta[property=\"og:type\"]", "meta[name=\"description\"]", "meta[name=\"twitter:title\"]", "meta[name=\"twitter:description\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "HIGH PRIORITY — Fix duplicate meta tags on /s/:id: remove default og:title, og:description, og:type, og:site_name, twitter:card, twitter:title, twitter:description and the 'A product of emergent.sh' <meta name=description> from /app/frontend/public/index.html so that <Helmet> in PublicBriefingPage.jsx is the sole authority. Keep <title>, <meta name=viewport>, <link rel=stylesheet> etc. Verify by re-running the Playwright script and asserting exactly ONE <meta property='og:title'> in document.head with content === item.headline.",
+    "(Info) app-level Cache-Control on /api/og/{id}.png is correct (verified via localhost); the ingress override to no-store is infrastructure-side and out of scope for the app."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 899 lines — exceeds the 700-line soft cap. Strongly recommend splitting: routers/{auth,news,rss,tts,digest,public,og}.py, services/{llm,tts,email}.py, jobs/scheduler.py, models.py, config.py.",
+    "In public_briefing, the view increment `db.briefings.update_one({...}, {'$inc': {'views': 1}})` runs AFTER an optional deep_dive() call and then the code manually adds 1 to doc['views']. Because deep_dive() reads and updates the same doc, a race between concurrent viewers can produce off-by-one under load. Consider using MongoDB $inc atomically and reading back the updated document via return_document=AFTER (motor supports find_one_and_update).",
+    "The OG image fallback path (`if not doc: png = _render_og_image('LUME VERITAS', ...)`) is nice, but there is no ETag/Last-Modified header — combined with the ingress overriding Cache-Control, every OG image request re-renders (~200ms Pillow work). Add ETag hashing (e.g., hash of topic+headline) so clients (and any downstream cache that respects ETag despite Cache-Control) can 304.",
+    "PublicBriefingPage.jsx: `viewsLabel` uses `item.views || 1` as fallback — this hides a zero-views state (a doc that has never been fetched before shows 1, not 0). Since GET /public/{id} increments views before returning, the first render will always be >=1, but if the endpoint were ever called without increment (e.g., preview), it would still show 1.",
+    "PublicBriefingPage.jsx: no dependency on `lang` in the ogImage URL — server renders OG image with headline in the language stored on the doc, but on shareUrl language switching there is no signal. Minor since OG images are meant to be language-agnostic snapshots.",
+    "index.html duplicates <meta name='description'> twice (line 7 'A product of emergent.sh' and line 25 'Lume Veritas: notizie...') even before Helmet adds a third — pre-existing bug independent of iter 4.",
+    "OG rendering uses `datetime.now(timezone.utc)` for the date shown on the image instead of `doc.generated_at` — so the OG image ALWAYS shows today's date, not the article's publication date. Consider using generated_at."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (47/47 pytest cases including 7 new for iter 4)",
+    "frontend": "80% — /s/:id page + counter + og:image URL + regression navigation all work; meta-tag deduplication (og:title, og:description, og:type, twitter:*, description) is BROKEN — 2-3 duplicate entries observed in document.head. Social preview correctness is at risk."
+  },
+  "test_credentials": "Backend tests create per-run unique users (test+<ts>_<uuid>@lume.dev / LumeTest2026!). No credentials needed for iter-4 flows.",
+  "seed_data_creation": "None. Views counter tests use fresh_briefing_id fixture with topic='Statistiche' to guarantee no cache interference.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py now has 47 tests (was 40). Added TestPublicViews (4) + TestOgImage (3). Existing TestDigest.test_digest_send_now was updated to accept the new 200-with-ok:false contract (was 200-or-502). Cache-Control assertion for /og/{id}.png must be done via LOCAL_API=http://localhost:8001/api because the ingress strips it on the public URL. The PRIMARY OUTSTANDING BUG is meta-tag duplication on /s/:id — verify by loading /s/<id> and running `document.head.querySelectorAll('meta[property=\"og:title\"]').length` — should be exactly 1 after main agent fixes index.html.",
+  "rca of the issue": "Meta tag duplication RCA: react-helmet-async manages ONLY the tags it renders. It has no mechanism to remove pre-existing <meta> tags that were in the initial HTML (index.html). When PublicBriefingPage's <Helmet> renders <meta property='og:title'>, the library adds a new element to <head>, but the original <meta property='og:title' content='Lume Veritas — le notizie...' /> from index.html line 28 remains. Result: 2 elements with property=og:title in <head>. Social scrapers (og:image debugger, Facebook Sharing Debugger, Twitter Card Validator) typically pick the FIRST occurrence they encounter, so they render the STATIC default title/description instead of the dynamic article-specific values. Reproduction: navigate to any /s/<id>, run in DevTools console: `document.head.querySelectorAll('meta[property=\"og:title\"]')` — length is 2. Mitigation: strip default og:*/twitter:*/description meta tags from /app/frontend/public/index.html so Helmet becomes the single source of truth for these tags."
+}

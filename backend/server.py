@@ -12,8 +12,10 @@ import bcrypt, jwt
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from emergentintegrations.llm.openai import OpenAITextToSpeech
-import base64, resend, feedparser
+import base64, resend, feedparser, io
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from PIL import Image, ImageDraw, ImageFont
+from fastapi.responses import Response
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -83,6 +85,7 @@ class BriefingItem(BaseModel):
     context: Optional[str] = None
     language: str
     generated_at: str
+    views: int = 0
 
 class BriefingListOut(BaseModel):
     topic: str
@@ -643,7 +646,106 @@ async def public_briefing(briefing_id: str):
             doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
         except Exception as e:
             log.warning(f"public deep-dive skipped: {e}")
+    # increment view counter (fire-and-forget)
+    try:
+        await db.briefings.update_one({"id": briefing_id}, {"$inc": {"views": 1}})
+        doc["views"] = int(doc.get("views", 0)) + 1
+    except Exception:
+        pass
     return BriefingItem(**doc)
+
+@api.get("/public/{briefing_id}/views")
+async def public_briefing_views(briefing_id: str):
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0, "views": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Non trovato")
+    return {"views": int(doc.get("views", 0))}
+
+# ==================== OG IMAGE ====================
+_OG_FONT_SERIF = "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf"
+_OG_FONT_SANS = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+_OG_FONT_MONO = "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf"
+
+def _wrap_text(draw, text, font, max_width):
+    words = text.split()
+    lines, cur = [], ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if bbox[2] - bbox[0] > max_width and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = test
+    if cur:
+        lines.append(cur)
+    return lines
+
+def _render_og_image(topic: str, headline: str) -> bytes:
+    W, H = 1200, 630
+    bg = (249, 249, 246)
+    fg = (17, 17, 17)
+    accent = (217, 56, 30)
+    muted = (110, 110, 100)
+    img = Image.new("RGB", (W, H), bg)
+    draw = ImageDraw.Draw(img)
+    # subtle grain via a few random-ish specks
+    for i in range(300):
+        x = (i * 37) % W
+        y = (i * 91) % H
+        draw.point((x, y), fill=(230, 230, 220))
+    # border
+    pad = 48
+    draw.rectangle([pad, pad, W - pad, H - pad], outline=fg, width=2)
+    # top row: brand + topic
+    try:
+        f_mono = ImageFont.truetype(_OG_FONT_MONO, 22)
+        f_title = ImageFont.truetype(_OG_FONT_SERIF, 64)
+        f_kicker = ImageFont.truetype(_OG_FONT_SANS, 20)
+    except Exception:
+        f_mono = ImageFont.load_default()
+        f_title = ImageFont.load_default()
+        f_kicker = ImageFont.load_default()
+    # Brand mark
+    box = 64
+    draw.rectangle([pad + 40, pad + 40, pad + 40 + box, pad + 40 + box], fill=fg)
+    draw.text((pad + 40 + 22, pad + 40 + 10), "L", font=f_title, fill=bg)
+    draw.text((pad + 40 + box + 20, pad + 48), "LUME VERITAS", font=f_mono, fill=fg)
+    draw.text((pad + 40 + box + 20, pad + 78), "le notizie che i giornali trascurano", font=f_kicker, fill=muted)
+    # topic pill (top-right)
+    topic_up = (topic or "").upper()[:36]
+    tw = draw.textbbox((0, 0), topic_up, font=f_mono)
+    pill_w = tw[2] - tw[0] + 32
+    px1 = W - pad - 40 - pill_w
+    py1 = pad + 46
+    draw.rectangle([px1, py1, W - pad - 40, py1 + 40], fill=accent)
+    draw.text((px1 + 16, py1 + 8), topic_up, font=f_mono, fill=(255, 255, 255))
+    # headline
+    max_w = W - 2 * (pad + 40)
+    lines = _wrap_text(draw, headline, f_title, max_w)[:5]
+    y = pad + 200
+    for ln in lines:
+        draw.text((pad + 40, y), ln, font=f_title, fill=fg)
+        y += 78
+    # bottom rule + CTA
+    draw.line([(pad + 40, H - pad - 90), (W - pad - 40, H - pad - 90)], fill=fg, width=2)
+    draw.text((pad + 40, H - pad - 70), "APPROFONDISCI SU LUME.VERITAS", font=f_mono, fill=fg)
+    ts = datetime.now(timezone.utc).strftime("%d.%m.%Y").upper()
+    tsw = draw.textbbox((0, 0), ts, font=f_mono)
+    draw.text((W - pad - 40 - (tsw[2] - tsw[0]), H - pad - 70), ts, font=f_mono, fill=muted)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+@api.get("/og/{briefing_id}.png")
+async def og_image(briefing_id: str):
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0, "topic": 1, "headline": 1})
+    if not doc:
+        # fallback image
+        png = _render_og_image("LUME VERITAS", "Le notizie che i giornali trascurano.")
+    else:
+        png = _render_og_image(doc.get("topic", ""), doc.get("headline", ""))
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 # ==================== EMAIL DIGEST ====================
 def _digest_html(user_name: str, lang: str, sections: list) -> str:
