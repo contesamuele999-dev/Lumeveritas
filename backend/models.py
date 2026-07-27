@@ -101,6 +101,25 @@ class DebateOut(BaseModel):
     generated_at: str
 
 
+# -------------------- Verification --------------------
+class VerifyCriterion(BaseModel):
+    key: str
+    score: int  # 0..100
+    rationale: str
+
+class VerifyOut(BaseModel):
+    briefing_id: str
+    overall_score: int  # 0..100
+    verdict: str  # short label
+    criteria: List[VerifyCriterion]
+    flagged_claims: List[str] = []
+    corroborating_sources: List[str] = []
+    contradicting_sources: List[str] = []
+    method_notes: str
+    language: str
+    generated_at: str
+
+
 # -------------------- Saved --------------------
 class SaveItemIn(BaseModel):
     briefing_id: str

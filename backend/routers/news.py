@@ -5,7 +5,8 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 
 from db import db
 from models import (BriefingIn, BriefingItem, BriefingListOut, AskIn, AskOut,
-                    ExplainIn, ExplainOut, ArticleQAIn, ArticleQA, DebateOut, DebateSide)
+                    ExplainIn, ExplainOut, ArticleQAIn, ArticleQA, DebateOut, DebateSide,
+                    VerifyOut, VerifyCriterion)
 from llm import llm_json, llm_text, sys_for, new_session
 from security import current_user
 from services.ratelimit import check_rate, client_key
@@ -308,3 +309,129 @@ Solo JSON."""
     )
     await db.debates.update_one({"briefing_id": briefing_id, "language": out.language}, {"$set": out.model_dump()}, upsert=True)
     return out
+
+
+# ---------- VERIFICATION ----------
+# Public, transparent criteria used to score a briefing:
+VERIFY_CRITERIA_IT = [
+    ("factuality", "Fattualità: quanto le affermazioni corrispondono a fatti verificabili"),
+    ("source_traceability", "Tracciabilità delle fonti: se esistono documenti/report pubblici primari"),
+    ("data_specificity", "Specificità di dati e numeri: date, cifre, luoghi verificabili"),
+    ("independence", "Indipendenza: presenza di verifiche indipendenti convergenti"),
+    ("recency", "Attualità: quanto sono recenti i dati citati"),
+    ("bias_transparency", "Trasparenza del punto di vista: distinzione tra fatti e opinioni"),
+    ("controversy_check", "Controversia: presenza di posizioni contrastanti serie e documentate"),
+]
+VERIFY_CRITERIA_EN = [
+    ("factuality", "Factuality: how well claims match verifiable facts"),
+    ("source_traceability", "Source traceability: whether primary public documents/reports exist"),
+    ("data_specificity", "Data specificity: dates, figures, verifiable locations"),
+    ("independence", "Independence: presence of convergent independent verifications"),
+    ("recency", "Recency: how up-to-date the cited data is"),
+    ("bias_transparency", "Bias transparency: separation of facts and opinions"),
+    ("controversy_check", "Controversy: presence of serious, documented dissenting views"),
+]
+
+
+def _verdict_from_score(score: int, language: str) -> str:
+    if language == "en":
+        if score >= 80: return "Highly credible"
+        if score >= 60: return "Credible with caveats"
+        if score >= 40: return "Mixed evidence"
+        if score >= 20: return "Weakly supported"
+        return "Unverified"
+    if score >= 80: return "Altamente credibile"
+    if score >= 60: return "Credibile con riserve"
+    if score >= 40: return "Prove contrastanti"
+    if score >= 20: return "Debolmente supportata"
+    return "Non verificata"
+
+
+@router.post("/news/{briefing_id}/verify", response_model=VerifyOut)
+async def verify(briefing_id: str, refresh: bool = False):
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Notizia non trovata")
+    language = doc.get("language", "it")
+    if not refresh:
+        cached = await db.verifications.find_one({"briefing_id": briefing_id, "language": language}, {"_id": 0})
+        if cached:
+            return VerifyOut(**cached)
+    criteria = VERIFY_CRITERIA_IT if language == "it" else VERIFY_CRITERIA_EN
+    criteria_lines = "\n".join([f"- {k}: {desc}" for k, desc in criteria])
+    lang_label = "italiano" if language == "it" else "English"
+    prompt = f"""Sei un fact-checker rigoroso. Valuta la seguente notizia usando i 7 criteri qui sotto, con onestà (anche brutale). Non premiare il testo solo perché è ben scritto. Se non sai, ammettilo e dai un punteggio basso.
+
+NOTIZIA:
+Titolo: {doc.get('headline','')}
+Riassunto: {doc.get('summary','')}
+Fatti dichiarati: {doc.get('key_facts',[])}
+{'Motivi reali (analisi precedente): ' + doc['real_reasons'] if doc.get('real_reasons') else ''}
+{'Contesto: ' + doc['context'] if doc.get('context') else ''}
+Fonti indicate: {doc.get('sources_hint',[])}
+
+CRITERI (chiave: descrizione):
+{criteria_lines}
+
+Rispondi SOLO in {lang_label}. Rispondi con JSON valido nel seguente formato ESATTO:
+{{
+  "criteria": [
+    {{"key": "factuality", "score": 0-100, "rationale": "1-2 frasi concrete"}},
+    ...ripeti per ognuno dei 7 criteri, stessi 'key' esatti...
+  ],
+  "flagged_claims": ["affermazione problematica 1", "..."],
+  "corroborating_sources": ["tipologia di fonte primaria che confermerebbe (es: rapporto ONU 2024)"],
+  "contradicting_sources": ["tipologia di fonte che potrebbe contraddire"],
+  "method_notes": "1-2 frasi che spiegano come hai ragionato e i tuoi limiti (es: non hai accesso a fonti in tempo reale)"
+}}
+Solo JSON, nessun testo fuori."""
+    session = new_session(f"verify-{briefing_id}")
+    data = await llm_json(session, sys_for(language), prompt)
+    parsed = []
+    scores = []
+    by_key = {c["key"]: c for c in (data.get("criteria") or []) if isinstance(c, dict) and c.get("key")}
+    for k, desc in criteria:
+        c = by_key.get(k, {"key": k, "score": 0, "rationale": ""})
+        try:
+            s = int(c.get("score", 0))
+        except Exception:
+            s = 0
+        s = max(0, min(100, s))
+        parsed.append(VerifyCriterion(key=k, score=s, rationale=str(c.get("rationale", ""))[:400]))
+        scores.append(s)
+    overall = round(sum(scores) / len(scores)) if scores else 0
+    out = VerifyOut(
+        briefing_id=briefing_id,
+        overall_score=overall,
+        verdict=_verdict_from_score(overall, language),
+        criteria=parsed,
+        flagged_claims=[str(x)[:220] for x in (data.get("flagged_claims") or [])][:10],
+        corroborating_sources=[str(x)[:220] for x in (data.get("corroborating_sources") or [])][:10],
+        contradicting_sources=[str(x)[:220] for x in (data.get("contradicting_sources") or [])][:10],
+        method_notes=str(data.get("method_notes", ""))[:600],
+        language=language,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    await db.verifications.update_one(
+        {"briefing_id": briefing_id, "language": language},
+        {"$set": out.model_dump()},
+        upsert=True,
+    )
+    return out
+
+
+@router.get("/news/{briefing_id}/verify", response_model=VerifyOut)
+async def get_verify_cached(briefing_id: str):
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0, "language": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Notizia non trovata")
+    cached = await db.verifications.find_one({"briefing_id": briefing_id, "language": doc.get("language", "it")}, {"_id": 0})
+    if not cached:
+        raise HTTPException(status_code=404, detail="Verifica non ancora eseguita")
+    return VerifyOut(**cached)
+
+
+@router.get("/verify/criteria")
+async def verify_criteria(language: str = "it"):
+    criteria = VERIFY_CRITERIA_IT if language == "it" else VERIFY_CRITERIA_EN
+    return {"language": language, "criteria": [{"key": k, "description": d} for k, d in criteria]}

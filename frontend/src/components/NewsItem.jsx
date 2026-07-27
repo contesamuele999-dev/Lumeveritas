@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Bookmark, BookmarkCheck, Sparkles, Users } from "lucide-react";
+import { Bookmark, BookmarkCheck, Sparkles, Users, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -9,6 +9,7 @@ import DeepDiveSheet from "@/components/DeepDiveSheet";
 import ClickableText from "@/components/ClickableText";
 import AudioButton from "@/components/AudioButton";
 import ShareButton from "@/components/ShareButton";
+import { VerifyBadge } from "@/components/VerifyPanel";
 
 export default function NewsItem({ item, featured = false, onSaveToggle, initiallySaved = false }) {
   const { lang } = useLang();
@@ -17,6 +18,15 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
   const [initialTab, setInitialTab] = useState("deep");
   const [saved, setSaved] = useState(initiallySaved);
   const [busy, setBusy] = useState(false);
+  const [verifyScore, setVerifyScore] = useState(null);
+
+  useEffect(() => {
+    let cancel = false;
+    api.get(`/news/${item.id}/verify`).then(({ data }) => {
+      if (!cancel) setVerifyScore(data.overall_score);
+    }).catch(() => {});
+    return () => { cancel = true; };
+  }, [item.id]);
 
   const toggleSave = async () => {
     if (!user) { toast.error(t(lang, "login_first")); return; }
@@ -81,6 +91,13 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
           className="h-12 px-5 border border-foreground bg-background hover:bg-foreground hover:text-background transition-colors font-mono-caps flex items-center gap-2"
         >
           <Users className="w-4 h-4" /> {t(lang, "debate_btn")}
+        </button>
+        <button
+          data-testid={`verify-btn-${item.id}`}
+          onClick={() => { setInitialTab("verify"); setOpenDeep(true); }}
+          className="h-12 px-5 border border-foreground bg-background hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors font-mono-caps flex items-center gap-2"
+        >
+          <ShieldCheck className="w-4 h-4" /> {t(lang, "verify_btn")}
         </button>
         <button
           data-testid={`save-btn-${item.id}`}

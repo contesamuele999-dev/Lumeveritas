@@ -3,10 +3,11 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Loader2, BookOpen, BarChart3, Landmark, ScrollText, MessageCircleQuestion, Users, Send, ArrowRight } from "lucide-react";
+import { Loader2, BookOpen, BarChart3, Landmark, ScrollText, MessageCircleQuestion, Users, Send, ArrowRight, ShieldCheck } from "lucide-react";
 import ClickableText from "@/components/ClickableText";
 import AudioButton from "@/components/AudioButton";
 import ShareButton from "@/components/ShareButton";
+import VerifyPanel from "@/components/VerifyPanel";
 
 export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "deep" }) {
   const { lang } = useLang();
@@ -90,6 +91,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
     { key: "deep", label: t(lang, "tab_deep"), icon: BookOpen },
     { key: "qa", label: t(lang, "tab_qa"), icon: MessageCircleQuestion },
     { key: "debate", label: t(lang, "tab_debate"), icon: Users },
+    { key: "verify", label: t(lang, "tab_verify"), icon: ShieldCheck },
   ];
 
   return (
@@ -279,6 +281,11 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
                   )}
                 </div>
               )}
+            </div>
+          )}
+          {tab === "verify" && (
+            <div data-testid="deep-verify">
+              <VerifyPanel briefingId={item.id} />
             </div>
           )}
         </div>
