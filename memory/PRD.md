@@ -16,11 +16,10 @@ User wants a fast, functional web app that collects the newest, verified, deeply
 - Deep-dive endpoint (real reasons, data points, context)
 - Free-form Ask endpoint (structured JSON answer)
 - Save / unsave briefings per user
-- Frontend: Home feed + featured article + topic pills, Ask page, Login/Register, Saved list, Profile with preferences + language + logout
-- Design: Editorial Truth (Newsreader serif + Manrope + JetBrains Mono, warm paper light theme, dark archive theme, accent red, cardless 1px borders, grain overlay, big tap targets ≥48px)
-- Full IT/EN i18n
-- Mobile bottom nav + desktop tab-bar
-- data-testid on all interactive elements
+- **Click-a-word to explain**: POST /api/explain returns short plain-language explanation; `<ClickableText>` component wraps significant words in Popover triggers inside headlines, summaries, deep-dive real_reasons/data_points/context and ask answers. Cached in Mongo `explanations` collection per language.
+- Graceful 429 handling for Gemini concurrency limits (`llm_text`) + Retry button in AskPage
+- SheetDescription sr-only added to DeepDiveSheet for a11y compliance
+- Full IT/EN i18n, Light/Dark theme, editorial Newsreader + Manrope + JetBrains Mono
 
 ## User Personas
 - Curious non-technical adult wanting alternative news
