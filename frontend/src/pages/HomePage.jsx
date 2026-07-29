@@ -7,6 +7,7 @@ import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { t } from "@/lib/i18n";
 import { Loader2, RefreshCcw, MousePointerClick, Radio } from "lucide-react";
+import { toast } from "sonner";
 import RssFeed from "@/components/RssFeed";
 
 export default function HomePage() {
@@ -53,6 +54,7 @@ export default function HomePage() {
       const { data } = await api.post("/news/briefing", body);
       setItems(data.items);
     } catch (e) {
+      toast.error(e?.response?.data?.detail || e?.message || (lang === "it" ? "Errore nel caricamento" : "Loading error"));
       setItems([]);
     } finally {
       setLoading(false); setRefreshing(false);
