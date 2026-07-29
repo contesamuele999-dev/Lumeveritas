@@ -6,8 +6,9 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 MONGO_URL = os.environ['MONGO_URL']
-DB_NAME = os.environ['DB_NAME']
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+DB_NAME = os.environ.get('DB_NAME', 'lume_veritas')
+GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret')
 JWT_ALG = 'HS256'
 JWT_EXPIRE_DAYS = 30

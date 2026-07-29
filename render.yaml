@@ -1,0 +1,45 @@
+services:
+  # ---------- Backend: FastAPI (Docker) ----------
+  - type: web
+    name: lume-veritas-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/
+    envVars:
+      - key: MONGO_URL          # MongoDB Atlas M0 connection string
+        sync: false
+      - key: DB_NAME
+        value: lume_veritas
+      - key: GEMINI_API_KEY     # Google AI Studio
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: JWT_SECRET
+        generateValue: true
+      - key: RESEND_API_KEY     # opzionale, per le email digest
+        sync: false
+      - key: SENDER_EMAIL
+        value: Lume Veritas <onboarding@resend.dev>
+      - key: PUBLIC_APP_URL     # URL del sito, es. https://lume-veritas.onrender.com
+        sync: false
+      - key: CORS_ORIGINS       # stesso URL del frontend
+        sync: false
+
+  # ---------- Frontend: React statico ----------
+  - type: web
+    name: lume-veritas
+    runtime: static
+    plan: free
+    buildCommand: cd frontend && yarn install && yarn build
+    staticPublishPath: ./frontend/build
+    envVars:
+      - key: REACT_APP_BACKEND_URL   # URL del backend, es. https://lume-veritas-api.onrender.com
+        sync: false
+    routes:
+      # SPA fallback: ogni percorso serve index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html

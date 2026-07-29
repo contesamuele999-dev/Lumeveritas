@@ -108,7 +108,7 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
           {saved ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
           {saved ? t(lang, "unsave") : t(lang, "save")}
         </button>
-        <AudioButton briefingId={item.id} testid={`audio-btn-${item.id}`} />
+        <AudioButton item={item} testid={`audio-btn-${item.id}`} />
         <ShareButton briefingId={item.id} testid={`share-btn-${item.id}`} />
       </div>
 

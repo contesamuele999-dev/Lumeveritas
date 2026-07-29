@@ -9,7 +9,7 @@ from db import close_db
 from log import log
 from services.digest import make_digest_jobs
 from services.migrations import run_startup_migrations
-from routers import auth, topics, news, saved, rss, tts, public, digest as digest_router
+from routers import auth, topics, news, saved, rss, public, digest as digest_router
 from routers.news import run_briefing
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -31,7 +31,6 @@ app.include_router(topics.router)
 app.include_router(news.router)
 app.include_router(saved.router)
 app.include_router(rss.router)
-app.include_router(tts.router)
 app.include_router(public.router)
 app.include_router(digest_router.router)
 

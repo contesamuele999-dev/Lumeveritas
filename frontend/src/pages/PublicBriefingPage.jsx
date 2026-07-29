@@ -80,7 +80,7 @@ export default function PublicBriefingPage() {
             <ClickableText text={item.summary} />
           </div>
           <div className="flex flex-wrap gap-3 pt-4">
-            <AudioButton briefingId={item.id} testid={`public-audio-${item.id}`} />
+            <AudioButton item={item} testid={`public-audio-${item.id}`} />
             <ShareButton briefingId={item.id} testid={`public-share-${item.id}`} />
           </div>
         </header>

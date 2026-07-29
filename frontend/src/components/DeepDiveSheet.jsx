@@ -112,7 +112,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
           </div>
           {data?.id && (
             <div className="mt-5 flex flex-wrap gap-3">
-              <AudioButton briefingId={data.id} testid={`deep-audio-${data.id}`} />
+              <AudioButton item={data} testid={`deep-audio-${data.id}`} />
               <ShareButton briefingId={data.id} testid={`deep-share-${data.id}`} />
             </div>
           )}

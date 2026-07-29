@@ -1,11 +1,11 @@
 import json, uuid
 from fastapi import HTTPException
-from emergentintegrations.llm.chat import LlmChat, UserMessage
-from config import EMERGENT_LLM_KEY
+from google import genai
+from google.genai import types
+from config import GEMINI_API_KEY, GEMINI_MODEL
 from log import log
 
-MODEL_PROVIDER = "gemini"
-MODEL_NAME = "gemini-3-flash-preview"
+_client = genai.Client(api_key=GEMINI_API_KEY)
 
 SYSTEM_IT = (
     "Sei Lume Veritas, un analista di notizie serio e non partigiano. Il tuo scopo è "
@@ -30,16 +30,21 @@ def sys_for(lang: str) -> str:
 
 
 async def llm_text(session_id: str, system: str, user_text: str) -> str:
-    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=system).with_model(MODEL_PROVIDER, MODEL_NAME)
+    # session_id resta nella firma per compatibilità: ogni chiamata usa già una sessione
+    # nuova (new_session), quindi non c'è storico da mantenere.
     try:
-        resp = await chat.send_message(UserMessage(text=user_text))
+        resp = await _client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_text,
+            config=types.GenerateContentConfig(system_instruction=system),
+        )
     except Exception as e:
         msg = str(e).lower()
-        if "429" in msg or "rate" in msg or "concurrent" in msg or "limit" in msg:
+        if "429" in msg or "rate" in msg or "quota" in msg or "resource_exhausted" in msg:
             raise HTTPException(status_code=429, detail="Il servizio IA è momentaneamente sovraccarico. Riprova tra qualche secondo.")
         log.error(f"LLM error: {e}")
         raise HTTPException(status_code=502, detail="Errore dal servizio IA. Riprova.")
-    return resp if isinstance(resp, str) else str(resp)
+    return resp.text or ""
 
 
 async def llm_json(session_id: str, system: str, user_text: str) -> dict:
