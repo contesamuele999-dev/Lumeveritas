@@ -30,7 +30,8 @@ async def digest_send_now(user=Depends(require_user)):
     ok, err = await send_digest_to_user(user, run_briefing)
     if not ok:
         msg = ("Il servizio email non ha accettato l'invio. "
-               "In modalità test Resend può inviare solo alla mail del proprietario dell'account: "
-               "verifica un dominio su resend.com/domains per inviare a chiunque.")
+               "Maileroo richiede un dominio di invio verificato: aggiungi il dominio su "
+               "app.maileroo.com → Domains, completa i record DNS (SPF/DKIM) e imposta "
+               "SENDER_EMAIL su un indirizzo di quel dominio.")
         return {"ok": False, "error": err or "unknown", "message": msg}
     return {"ok": True, "email": user["email"]}

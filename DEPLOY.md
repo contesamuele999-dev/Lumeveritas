@@ -1,6 +1,6 @@
 # Deploy Lume Veritas — tutto gratis
 
-Stack: **Render** (backend Docker + frontend statico) + **MongoDB Atlas M0** + **Gemini API** + **Resend**.
+Stack: **Render** (backend Docker + frontend statico) + **MongoDB Atlas M0** + **Gemini API** + **Maileroo**.
 Costo: 0 €.
 
 ---
@@ -20,11 +20,15 @@ Questa è la tua `MONGO_URL`.
 1. https://aistudio.google.com/apikey → **Create API key**.
 2. Copia. Questa è `GEMINI_API_KEY`. Il tier gratuito basta per uso personale.
 
-## 3. Resend (email digest, opzionale)
+## 3. Maileroo (email digest, opzionale)
 
-1. https://resend.com → API Keys → crea key = `RESEND_API_KEY`.
-2. Senza dominio verificato Resend invia **solo alla tua email**. Per inviare a chiunque:
-   Domains → verifica un dominio → poi cambia `SENDER_EMAIL`.
+1. https://maileroo.com → registrati. Piano free: 3.000 email/mese.
+2. **Domains**: Maileroo assegna un sottodominio pronto all'uso tipo `tuonome.maileroo.app`
+   (nessun DNS da toccare) — basta per partire. Per inviare dal tuo dominio: Add Domain +
+   record SPF/DKIM, aspetta stato *Verified*.
+3. **Sending Keys → Create** → la key è `MAILEROO_API_KEY`.
+4. `SENDER_EMAIL` = un indirizzo su quel dominio (es. `noreply@tuo-dominio.it`),
+   `SENDER_NAME` = `Lume Veritas`.
 
 ## 4. Repo GitHub
 
@@ -49,7 +53,8 @@ git push -u origin main
    |---|---|
    | `MONGO_URL` | stringa Atlas del punto 1 |
    | `GEMINI_API_KEY` | key del punto 2 |
-   | `RESEND_API_KEY` | key del punto 3 (o vuoto) |
+   | `MAILEROO_API_KEY` | sending key del punto 3 (o vuoto) |
+   | `SENDER_EMAIL` | indirizzo sul dominio verificato (o vuoto) |
    | `PUBLIC_APP_URL` | lascia vuoto per ora |
    | `CORS_ORIGINS` | lascia vuoto per ora |
 

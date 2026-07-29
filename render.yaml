@@ -19,10 +19,12 @@ services:
         value: gemini-3.5-flash
       - key: JWT_SECRET
         generateValue: true
-      - key: RESEND_API_KEY     # opzionale, per le email digest
+      - key: MAILEROO_API_KEY   # opzionale, per le email digest
         sync: false
-      - key: SENDER_EMAIL
-        value: Lume Veritas <onboarding@resend.dev>
+      - key: SENDER_EMAIL       # indirizzo su un dominio verificato in Maileroo
+        sync: false
+      - key: SENDER_NAME
+        value: Lume Veritas
       - key: PUBLIC_APP_URL     # URL del sito, es. https://lume-veritas.onrender.com
         sync: false
       - key: CORS_ORIGINS       # stesso URL del frontend

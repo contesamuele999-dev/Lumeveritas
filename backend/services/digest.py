@@ -2,15 +2,14 @@
 import asyncio
 from datetime import datetime, timezone
 from typing import Optional
-import resend
+from maileroo import MailerooClient, EmailAddress
 
-from config import RESEND_API_KEY, SENDER_EMAIL, PUBLIC_APP_URL
+from config import MAILEROO_API_KEY, SENDER_EMAIL, SENDER_NAME, PUBLIC_APP_URL
 from db import db
 from log import log
 from models import BriefingIn, DEFAULT_TOPICS
 
-if RESEND_API_KEY:
-    resend.api_key = RESEND_API_KEY
+mailer = MailerooClient(MAILEROO_API_KEY) if MAILEROO_API_KEY else None
 
 
 def _digest_html(user_name: str, lang: str, sections: list) -> str:
@@ -88,8 +87,8 @@ async def build_digest_for_user(user_doc: dict, run_briefing_fn) -> Optional[dic
 
 
 async def send_digest_to_user(user_doc: dict, run_briefing_fn) -> tuple[bool, Optional[str]]:
-    if not RESEND_API_KEY:
-        return False, "resend_key_missing"
+    if not mailer:
+        return False, "maileroo_key_missing"
     payload = await build_digest_for_user(user_doc, run_briefing_fn)
     if not payload:
         return False, "no_content"
@@ -98,18 +97,23 @@ async def send_digest_to_user(user_doc: dict, run_briefing_fn) -> tuple[bool, Op
         subject = "Lume Veritas — Il tuo digest settimanale" if payload["lang"] == "it" else "Lume Veritas — Your weekly digest"
     else:
         subject = "Lume Veritas — Il tuo digest quotidiano" if payload["lang"] == "it" else "Lume Veritas — Your daily digest"
-    params = {"from": SENDER_EMAIL, "to": [user_doc["email"]], "subject": subject, "html": payload["html"]}
+    params = {
+        "from": EmailAddress(SENDER_EMAIL, SENDER_NAME),
+        "to": [EmailAddress(user_doc["email"], user_doc.get("name") or user_doc["email"].split("@")[0])],
+        "subject": subject,
+        "html": payload["html"],
+    }
     try:
-        r = await asyncio.to_thread(resend.Emails.send, params)
+        ref = await asyncio.to_thread(mailer.send_basic_email, params)
         await db.digest_log.insert_one({
             "user_id": user_doc["id"], "email": user_doc["email"],
             "sent_at": datetime.now(timezone.utc).isoformat(),
-            "resend_id": (r or {}).get("id"),
+            "maileroo_ref": ref,
         })
         return True, None
     except Exception as e:
         msg = str(e)
-        log.error(f"Resend send failed to {user_doc['email']}: {msg}")
+        log.error(f"Maileroo send failed to {user_doc['email']}: {msg}")
         return False, msg[:220]
 
 

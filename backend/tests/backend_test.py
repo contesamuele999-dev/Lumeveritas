@@ -531,8 +531,8 @@ class TestDigest:
         assert r.status_code == 401
 
     def test_digest_send_now(self, client, auth_headers):
-        """Resend free tier only delivers to account owner. Backend now returns 200 with
-        {ok:false, error, message} on Resend rejection instead of 502 (per iter 3 fix)."""
+        """Maileroo refuses sends from an unverified domain. Backend returns 200 with
+        {ok:false, error, message} on provider rejection instead of 502 (per iter 3 fix)."""
         r = client.post(f"{API}/digest/send-now", headers=auth_headers, timeout=AI_TIMEOUT * 2)
         assert r.status_code == 200, f"expected 200 always, got {r.status_code}: {r.text[:400]}"
         d = r.json()
@@ -540,7 +540,7 @@ class TestDigest:
         if d["ok"] is True:
             assert "email" in d
         else:
-            # Resend free-tier rejection path
+            # provider rejection path (key mancante / dominio non verificato)
             assert "error" in d
             assert "message" in d and isinstance(d["message"], str) and len(d["message"]) > 10
 

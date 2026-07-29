@@ -18,7 +18,7 @@ User wants a fast, functional web app that collects the newest, verified, deeply
 - **Deep Dive Sheet with tabs**: Approfondisci · Domande · Dibattito
 - Save / unsave briefings
 - Click-a-word explain
-- **Digest email** via Resend with frequency picker (daily 08:00 / weekly Monday 08:00 Europe/Rome) + manual send-now
+- **Digest email** via Maileroo with frequency picker (daily 08:00 / weekly Monday 08:00 Europe/Rome) + manual send-now
 - RSS live feeds (20+ independent sources)
 - Audio TTS (OpenAI tts-1) with mp3 cache
 - Public shareable URLs `/s/:id` with views counter + dynamic OG image
