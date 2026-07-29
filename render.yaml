@@ -16,7 +16,7 @@ services:
       - key: GEMINI_API_KEY     # Google AI Studio
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.5-flash
       - key: JWT_SECRET
         generateValue: true
       - key: RESEND_API_KEY     # opzionale, per le email digest
