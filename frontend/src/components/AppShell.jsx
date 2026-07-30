@@ -135,6 +135,24 @@ export default function AppShell() {
             {t(lang, "no_data_note")}
           </div>
         </div>
+
+        {/* Firma */}
+        <div className="mt-8 pt-6 border-t border-border flex flex-col items-center gap-3 text-center" data-testid="signature">
+          <blockquote className="font-serif-display text-xl md:text-2xl italic leading-snug">
+            &ldquo;{lang === "it" ? "La verità ci rende liberi" : "The truth sets us free"}&rdquo;
+          </blockquote>
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <span className="h-px w-8 bg-border" />
+            <span className="font-mono-caps text-[10px]">
+              {lang === "it" ? "Costruito da" : "Built by"}
+            </span>
+            <span className="h-px w-8 bg-border" />
+          </div>
+          <div className="font-serif-display text-lg tracking-tight">
+            Samuele Contessa
+            <span className="text-accent">.</span>
+          </div>
+        </div>
       </footer>
     </div>
   );
