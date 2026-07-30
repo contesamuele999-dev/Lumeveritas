@@ -158,7 +158,7 @@ export default function VerifyPanel({ briefingId }) {
             </div>
             <ul className="space-y-2 text-sm">
               {data.corroborating_sources.map((s, i) => (
-                <li key={i} className="flex gap-2"><span className="text-emerald-600">→</span><span>{s}</span></li>
+                <li key={i} className="flex gap-2"><span className="text-emerald-600">→</span><span><ClickableText text={s} /></span></li>
               ))}
             </ul>
           </div>
@@ -170,7 +170,7 @@ export default function VerifyPanel({ briefingId }) {
             </div>
             <ul className="space-y-2 text-sm">
               {data.contradicting_sources.map((s, i) => (
-                <li key={i} className="flex gap-2"><span className="text-accent">→</span><span>{s}</span></li>
+                <li key={i} className="flex gap-2"><span className="text-accent">→</span><span><ClickableText text={s} /></span></li>
               ))}
             </ul>
           </div>

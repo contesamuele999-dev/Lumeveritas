@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { t } from "@/lib/i18n";
 import { Sun, Moon, LogIn, LogOut, User, Bookmark, Home, MessageCircleQuestion, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import InstallPrompt from "@/components/InstallPrompt";
 
 export default function AppShell() {
   const { lang, setLang, theme, setTheme } = useLang();
@@ -21,15 +22,15 @@ export default function AppShell() {
     <div className="App min-h-screen grain relative">
       {/* HEADER */}
       <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border">
-        <div className="max-w-[1400px] mx-auto px-5 md:px-10 py-4 flex items-center gap-6">
+        <div className="max-w-[1400px] mx-auto px-4 md:px-10 py-2.5 md:py-4 flex items-center gap-3 md:gap-6">
           <button
             data-testid="brand-home-btn"
             onClick={() => nav("/")}
             className="flex items-center gap-3 group"
           >
-            <div className="w-10 h-10 bg-foreground text-background flex items-center justify-center font-serif-display text-xl font-semibold">L</div>
+            <div className="w-8 h-8 md:w-10 md:h-10 shrink-0 bg-foreground text-background flex items-center justify-center font-serif-display text-xl font-semibold">L</div>
             <div className="hidden sm:block text-left leading-tight">
-              <div className="font-serif-display text-2xl font-semibold tracking-tight">Lume Veritas</div>
+              <div className="font-serif-display text-xl md:text-2xl font-semibold tracking-tight">Lume Veritas</div>
               <div className="font-mono-caps text-muted-foreground">{t(lang, "tagline")}</div>
             </div>
           </button>
@@ -99,33 +100,35 @@ export default function AppShell() {
       </header>
 
       {/* MAIN */}
-      <main className="max-w-[1400px] mx-auto px-5 md:px-10 py-8 md:py-12 relative z-10">
+      <main className="max-w-[1400px] mx-auto px-4 md:px-10 py-5 md:py-12 relative z-10">
         <Outlet />
       </main>
 
       {/* MOBILE BOTTOM NAV */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-background border-t border-border grid grid-cols-4">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-background border-t border-border grid grid-cols-4 pb-[env(safe-area-inset-bottom)]">
         {links.map((l) => (
           <NavLink
             key={l.to}
             to={l.to}
             data-testid={`mobile-${l.testid}`}
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center py-3 gap-1 font-mono-caps ${
+              `flex flex-col items-center justify-center py-2 gap-0.5 font-mono-caps ${
                 isActive ? "text-accent" : "text-muted-foreground"
               }`
             }
           >
-            <l.icon className="w-5 h-5" />
+            <l.icon className="w-4 h-4" />
             <span className="text-[10px]">{l.label}</span>
           </NavLink>
         ))}
       </nav>
 
-      <div className="md:hidden h-20" />
+      <div className="md:hidden h-16" />
+
+      <InstallPrompt />
 
       {/* Footer */}
-      <footer className="border-t border-border mt-16 py-8 max-w-[1400px] mx-auto px-5 md:px-10 relative z-10">
+      <footer className="border-t border-border mt-10 md:mt-16 py-6 md:py-8 max-w-[1400px] mx-auto px-4 md:px-10 relative z-10">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="font-mono-caps text-muted-foreground">Lume Veritas — {new Date().getFullYear()}</div>
           <div className="text-sm text-muted-foreground max-w-xl">

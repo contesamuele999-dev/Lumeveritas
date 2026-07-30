@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AskBar from "@/components/AskBar";
 import TopicPills from "@/components/TopicPills";
 import NewsItem from "@/components/NewsItem";
@@ -41,9 +41,13 @@ export default function HomePage() {
     if (!selected) setSelected(visibleTopics[0] || topics[0]);
   }, [topics, visibleTopics, selected]);
 
+  const reqId = useRef(0);
+
   const loadBriefing = async (topic, refresh = false) => {
     if (!topic) return;
-    refresh ? setRefreshing(true) : setLoading(true);
+    const myReq = ++reqId.current;
+    if (refresh) setRefreshing(true);
+    else { setLoading(true); setItems([]); }  // niente notizie del topic precedente durante l'attesa
     try {
       const label = lang === "it" ? topic.label_it : topic.label_en;
       const body = { topic: label, language: lang, refresh };
@@ -52,12 +56,14 @@ export default function HomePage() {
         if (topic.source) body.source = topic.source;
       }
       const { data } = await api.post("/news/briefing", body);
+      if (myReq !== reqId.current) return;  // click rapido su un altro argomento: risposta obsoleta
       setItems(data.items);
     } catch (e) {
+      if (myReq !== reqId.current) return;
       toast.error(e?.response?.data?.detail || e?.message || (lang === "it" ? "Errore nel caricamento" : "Loading error"));
       setItems([]);
     } finally {
-      setLoading(false); setRefreshing(false);
+      if (myReq === reqId.current) { setLoading(false); setRefreshing(false); }
     }
   };
 
@@ -69,27 +75,27 @@ export default function HomePage() {
   const rest = items.slice(1);
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-6 md:space-y-10">
       {/* HERO */}
-      <section className="pt-2 pb-4 border-b border-border">
-        <div className="grid md:grid-cols-12 gap-8 items-end">
+      <section className="pt-1 pb-3 md:pt-2 md:pb-4 border-b border-border">
+        <div className="grid md:grid-cols-12 gap-4 md:gap-8 items-end">
           <div className="md:col-span-8">
-            <div className="font-mono-caps text-accent mb-4">{t(lang, "welcome")} — Lume Veritas</div>
-            <h1 className="font-serif-display text-5xl md:text-7xl leading-[0.95] tracking-tight">
+            <div className="font-mono-caps text-accent mb-2 md:mb-4">{t(lang, "welcome")} — Lume Veritas</div>
+            <h1 className="font-serif-display text-3xl md:text-7xl leading-[1] md:leading-[0.95] tracking-tight">
               {lang === "it"
                 ? <>Le notizie <em className="italic text-accent">vere</em>, ciò che gli altri <em className="italic">trascurano</em>.</>
                 : <>The <em className="italic text-accent">real</em> news, the stories others <em className="italic">overlook</em>.</>}
             </h1>
           </div>
           <div className="md:col-span-4">
-            <p className="text-lg md:text-xl text-foreground/80 leading-relaxed">
+            <p className="hidden md:block text-lg md:text-xl text-foreground/80 leading-relaxed">
               {lang === "it"
                 ? "Mercati, sondaggi, leggi, scoperte, guerre. Con i veri motivi dietro. Approfondisci qualsiasi notizia con un click."
                 : "Markets, polls, laws, discoveries, wars. With the real reasons behind. Deep-dive any story with one click."}
             </p>
           </div>
         </div>
-        <div className="mt-8 max-w-3xl space-y-2">
+        <div className="mt-4 md:mt-8 max-w-3xl space-y-2">
           <AskBar big />
           <div className="font-mono-caps text-muted-foreground text-[11px] flex items-center gap-2">
             <MousePointerClick className="w-3.5 h-3.5" /> {t(lang, "click_word_hint")}
@@ -116,9 +122,20 @@ export default function HomePage() {
 
       {/* NEWS FEED */}
       <section>
-        {loading && !items.length ? (
-          <div className="py-24 flex items-center gap-3 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" /> {t(lang, "loading")}
+        {loading ? (
+          <div className="py-8 space-y-6" data-testid="briefing-loading">
+            <div className="flex items-center gap-3 text-muted-foreground font-mono-caps text-[11px]">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {t(lang, "loading")} — {lang === "it" ? selected?.label_it : selected?.label_en}
+            </div>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="animate-pulse space-y-3 border-b border-border pb-6">
+                <div className="h-3 w-24 bg-muted" />
+                <div className="h-7 md:h-9 w-4/5 bg-muted" />
+                <div className="h-4 w-full bg-muted" />
+                <div className="h-4 w-2/3 bg-muted" />
+              </div>
+            ))}
           </div>
         ) : items.length === 0 ? (
           <div className="py-24 text-center text-muted-foreground font-mono-caps">— no items —</div>

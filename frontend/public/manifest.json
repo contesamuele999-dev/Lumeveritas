@@ -1,0 +1,17 @@
+{
+  "name": "Lume Veritas — le notizie che i giornali trascurano",
+  "short_name": "Lume Veritas",
+  "description": "Notizie verificate, veri motivi dietro i fatti, spiegate parola per parola.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "lang": "it",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

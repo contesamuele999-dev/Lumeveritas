@@ -9,8 +9,12 @@ const PopoverTrigger = PopoverPrimitive.Trigger
 
 const PopoverAnchor = PopoverPrimitive.Anchor
 
-const PopoverContent = React.forwardRef(({ className, align = "center", sideOffset = 4, ...props }, ref) => (
-  <PopoverPrimitive.Portal>
+// portal=false serve ai popover annidati: restando dentro il DOM del popover padre,
+// un click sul figlio non viene letto come "click fuori" e il padre non si chiude.
+const PopoverContent = React.forwardRef(({ className, align = "center", sideOffset = 4, portal = true, ...props }, ref) => {
+  const Wrapper = portal ? PopoverPrimitive.Portal : React.Fragment;
+  return (
+  <Wrapper>
     <PopoverPrimitive.Content
       ref={ref}
       align={align}
@@ -20,8 +24,9 @@ const PopoverContent = React.forwardRef(({ className, align = "center", sideOffs
         className
       )}
       {...props} />
-  </PopoverPrimitive.Portal>
-))
+  </Wrapper>
+  );
+})
 PopoverContent.displayName = PopoverPrimitive.Content.displayName
 
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor }

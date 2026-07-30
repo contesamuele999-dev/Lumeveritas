@@ -17,8 +17,8 @@ export default function AskBar({ big = false }) {
 
   return (
     <form onSubmit={submit} data-testid="ask-bar-form" className="w-full">
-      <div className={`flex items-stretch border border-foreground bg-background ${big ? "h-16" : "h-14"}`}>
-        <div className="flex items-center justify-center px-4 border-r border-foreground">
+      <div className={`flex items-stretch border border-foreground bg-background ${big ? "h-13 md:h-16" : "h-12 md:h-14"}`}>
+        <div className="flex items-center justify-center px-3 md:px-4 border-r border-foreground shrink-0">
           <Search className="w-5 h-5" />
         </div>
         <input
@@ -26,12 +26,12 @@ export default function AskBar({ big = false }) {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder={t(lang, "ask_placeholder")}
-          className={`flex-1 bg-transparent outline-none px-4 ${big ? "text-lg md:text-xl" : "text-base md:text-lg"}`}
+          className={`flex-1 min-w-0 bg-transparent outline-none px-3 md:px-4 ${big ? "text-lg md:text-xl" : "text-base md:text-lg"}`}
         />
         <button
           type="submit"
           data-testid="ask-bar-submit"
-          className="px-5 md:px-7 font-mono-caps bg-foreground text-background hover:bg-accent transition-colors flex items-center gap-2"
+          className="px-3 md:px-7 shrink-0 font-mono-caps bg-foreground text-background hover:bg-accent transition-colors flex items-center gap-2"
         >
           {t(lang, "send")} <ArrowRight className="w-4 h-4" />
         </button>

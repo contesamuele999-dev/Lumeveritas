@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import AskBar from "@/components/AskBar";
 import { Loader2, Sparkles, AlertTriangle, ListChecks, RefreshCcw } from "lucide-react";
 import ClickableText from "@/components/ClickableText";
+import SourceLinks from "@/components/SourceLinks";
 
 export default function AskPage() {
   const { lang } = useLang();
@@ -37,7 +38,7 @@ export default function AskPage() {
     <div className="max-w-4xl space-y-10">
       <div>
         <div className="font-mono-caps text-accent mb-3">{t(lang, "ask")}</div>
-        <h1 className="font-serif-display text-4xl md:text-6xl leading-none tracking-tight mb-4">
+        <h1 className="font-serif-display text-3xl md:text-6xl leading-none tracking-tight mb-4">
           {t(lang, "ask_title")}
         </h1>
         <p className="text-lg md:text-xl text-foreground/80 max-w-3xl">
@@ -93,7 +94,7 @@ export default function AskPage() {
                     {answer.key_points.map((p, i) => (
                       <li key={i} className="pt-3 flex gap-4">
                         <span className="font-mono-caps text-accent shrink-0">{String(i + 1).padStart(2, "0")}</span>
-                        <span className="text-base md:text-lg">{p}</span>
+                        <span className="text-base md:text-lg"><ClickableText text={p} contextText={answer.answer} /></span>
                       </li>
                     ))}
                   </ul>
@@ -106,10 +107,12 @@ export default function AskPage() {
                     <AlertTriangle className="w-4 h-4" /> {t(lang, "caveats")}
                   </div>
                   <ul className="space-y-1 text-sm md:text-base text-foreground/80">
-                    {answer.caveats.map((c, i) => <li key={i}>• {c}</li>)}
+                    {answer.caveats.map((c, i) => <li key={i}>• <ClickableText text={c} /></li>)}
                   </ul>
                 </section>
               )}
+
+              <SourceLinks sources={answer.sources} />
             </div>
           )}
         </div>

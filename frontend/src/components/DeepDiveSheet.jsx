@@ -8,6 +8,8 @@ import ClickableText from "@/components/ClickableText";
 import AudioButton from "@/components/AudioButton";
 import ShareButton from "@/components/ShareButton";
 import VerifyPanel from "@/components/VerifyPanel";
+import SourceLinks from "@/components/SourceLinks";
+import useBackClose from "@/hooks/useBackClose";
 
 export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "deep" }) {
   const { lang } = useLang();
@@ -21,6 +23,9 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
   const [asking, setAsking] = useState(false);
 
   useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
+
+  // il tasto Indietro chiude il pannello e torna alla lista, non fuori dal sito
+  useBackClose(open, () => onOpenChange(false));
 
   // Load deep dive
   useEffect(() => {
@@ -97,11 +102,11 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto p-0" data-testid="deep-dive-sheet">
-        <div className="p-6 md:p-8 border-b border-border">
+        <div className="p-4 md:p-8 border-b border-border">
           <div className="font-mono-caps text-accent mb-3">{data?.topic}</div>
           <SheetHeader className="text-left space-y-2">
-            <SheetTitle className="font-serif-display text-3xl md:text-4xl leading-tight tracking-tight">
-              {data?.headline}
+            <SheetTitle className="font-serif-display text-2xl md:text-4xl leading-tight tracking-tight">
+              <ClickableText text={data?.headline} contextText={data?.summary} />
             </SheetTitle>
             <SheetDescription className="sr-only">
               {data?.headline}
@@ -110,6 +115,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
           <div className="mt-4 text-base md:text-lg text-foreground/85 leading-relaxed">
             <ClickableText text={data?.summary} />
           </div>
+          <SourceLinks sources={data?.sources} />
           {data?.id && (
             <div className="mt-5 flex flex-wrap gap-3">
               <AudioButton item={data} testid={`deep-audio-${data.id}`} />
@@ -125,7 +131,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
               key={tb.key}
               data-testid={`deep-tab-${tb.key}`}
               onClick={() => setTab(tb.key)}
-              className={`flex-1 px-4 h-14 font-mono-caps flex items-center justify-center gap-2 transition-colors border-r border-border last:border-r-0 ${
+              className={`flex-1 px-2 md:px-4 h-12 md:h-14 font-mono-caps flex items-center justify-center gap-2 transition-colors border-r border-border last:border-r-0 ${
                 tab === tb.key ? "bg-foreground text-background" : "hover:bg-secondary"
               }`}
             >
@@ -134,7 +140,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
           ))}
         </div>
 
-        <div className="p-6 md:p-8">
+        <div className="p-4 md:p-8">
           {tab === "deep" && (
             <>
               {loadingDeep && (
@@ -220,7 +226,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
                     <div key={qa.id} className="py-5" data-testid={`qa-item-${qa.id}`}>
                       <div className="flex gap-3 items-start mb-3">
                         <ArrowRight className="w-4 h-4 text-accent shrink-0 mt-1.5" />
-                        <div className="font-serif-display text-lg leading-snug">{qa.question}</div>
+                        <div className="font-serif-display text-lg leading-snug"><ClickableText text={qa.question} /></div>
                       </div>
                       <div className="pl-7 space-y-2">
                         <div className="text-base leading-relaxed"><ClickableText text={qa.answer} /></div>
@@ -229,7 +235,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
                             {qa.key_points.map((p, i) => (
                               <li key={i} className="flex gap-2 text-sm text-foreground/80">
                                 <span className="font-mono-caps text-accent text-[10px] mt-1">•</span>
-                                <span>{p}</span>
+                                <span><ClickableText text={p} contextText={qa.answer} /></span>
                               </li>
                             ))}
                           </ul>
@@ -261,7 +267,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
                           {lang === "it" ? `PARTE ${String(i + 1).padStart(2, "0")}` : `SIDE ${String(i + 1).padStart(2, "0")}`}
                         </div>
                         <div className="font-serif-display text-2xl leading-tight mb-2">{s.persona}</div>
-                        <div className="text-base italic text-foreground/85 mb-3">"{s.stance}"</div>
+                        <div className="text-base italic text-foreground/85 mb-3">"<ClickableText text={s.stance} />"</div>
                         <ul className="space-y-2">
                           {s.arguments.map((a, j) => (
                             <li key={j} className="flex gap-3 text-sm md:text-base">

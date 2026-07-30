@@ -37,6 +37,10 @@ class BriefingIn(BaseModel):
     kind: Optional[Literal["topic", "person", "telegram", "hashtag", "channel"]] = "topic"
     source: Optional[str] = None
 
+class SourceLink(BaseModel):
+    title: str
+    url: str
+
 class BriefingItem(BaseModel):
     id: str
     topic: str
@@ -44,6 +48,7 @@ class BriefingItem(BaseModel):
     summary: str
     key_facts: List[str] = []
     sources_hint: List[str] = []
+    sources: List[SourceLink] = []
     real_reasons: Optional[str] = None
     data_points: List[str] = []
     context: Optional[str] = None
@@ -66,6 +71,7 @@ class AskOut(BaseModel):
     answer: str
     key_points: List[str] = []
     caveats: List[str] = []
+    sources: List[SourceLink] = []
 
 class ExplainIn(BaseModel):
     word: str
@@ -152,23 +158,43 @@ class TTSIn(BaseModel):
 
 
 # -------------------- Static topic catalog --------------------
+# section = raggruppamento mostrato nella home. Le etichette viaggiano col topic così il
+# frontend raggruppa senza una seconda tabella da tenere allineata.
+_SECTIONS = {
+    "mondo": ("Mondo & Potere", "World & Power"),
+    "soldi": ("Soldi", "Money"),
+    "sapere": ("Sapere & Tecnologia", "Knowledge & Tech"),
+    "vita": ("Vita quotidiana", "Everyday life"),
+}
+
+def _topic(key, it, en, section):
+    s_it, s_en = _SECTIONS[section]
+    return {"key": key, "label_it": it, "label_en": en,
+            "section": section, "section_it": s_it, "section_en": s_en}
+
 DEFAULT_TOPICS = [
-    {"key": "mercati", "label_it": "Mercati", "label_en": "Markets"},
-    {"key": "popolazione", "label_it": "Tendenze popolazione", "label_en": "Population Trends"},
-    {"key": "sondaggi", "label_it": "Sondaggi", "label_en": "Polls & Surveys"},
-    {"key": "statistiche", "label_it": "Statistiche", "label_en": "Statistics"},
-    {"key": "invenzioni", "label_it": "Invenzioni", "label_en": "Inventions"},
-    {"key": "leggi", "label_it": "Leggi approvate", "label_en": "Laws Passed"},
-    {"key": "scienza", "label_it": "Scoperte scientifiche", "label_en": "Scientific Discoveries"},
-    {"key": "politica", "label_it": "Scelte politiche", "label_en": "Political Choices"},
-    {"key": "guerre", "label_it": "Guerre e veri motivi", "label_en": "Wars & Real Reasons"},
-    {"key": "salute", "label_it": "Salute", "label_en": "Health"},
-    {"key": "tecnologia", "label_it": "Tecnologia", "label_en": "Technology"},
-    {"key": "ambiente", "label_it": "Ambiente", "label_en": "Environment"},
-    {"key": "economia", "label_it": "Economia", "label_en": "Economy"},
-    {"key": "geopolitica", "label_it": "Geopolitica", "label_en": "Geopolitics"},
-    {"key": "societa", "label_it": "Cultura & Società", "label_en": "Culture & Society"},
-    {"key": "cripto", "label_it": "Cripto & Finanza Alt.", "label_en": "Crypto & Alt Finance"},
+    _topic("geopolitica", "Geopolitica", "Geopolitics", "mondo"),
+    _topic("guerre", "Guerre e veri motivi", "Wars & Real Reasons", "mondo"),
+    _topic("politica", "Scelte politiche", "Political Choices", "mondo"),
+    _topic("leggi", "Leggi approvate", "Laws Passed", "mondo"),
+
+    _topic("mercati", "Mercati", "Markets", "soldi"),
+    _topic("economia", "Economia", "Economy", "soldi"),
+    _topic("cripto", "Cripto & Finanza Alt.", "Crypto & Alt Finance", "soldi"),
+
+    _topic("ia", "Intelligenza artificiale", "Artificial Intelligence", "sapere"),
+    _topic("tecnologia", "Tecnologia", "Technology", "sapere"),
+    _topic("scienza", "Scoperte scientifiche", "Scientific Discoveries", "sapere"),
+    _topic("invenzioni", "Invenzioni", "Inventions", "sapere"),
+    _topic("scuola", "Scuola", "School & Education", "sapere"),
+
+    _topic("curiosita", "Curiosità", "Curiosities", "vita"),
+    _topic("salute", "Salute", "Health", "vita"),
+    _topic("ambiente", "Ambiente", "Environment", "vita"),
+    _topic("societa", "Cultura & Società", "Culture & Society", "vita"),
+    _topic("popolazione", "Tendenze popolazione", "Population Trends", "vita"),
+    _topic("sondaggi", "Sondaggi", "Polls & Surveys", "vita"),
+    _topic("statistiche", "Statistiche", "Statistics", "vita"),
 ]
 
 RSS_FEEDS = {
@@ -188,6 +214,9 @@ RSS_FEEDS = {
     "statistiche": ["https://ourworldindata.org/atom.xml", "https://www.pewresearch.org/feed/"],
     "popolazione": ["https://ourworldindata.org/atom.xml", "https://www.pewresearch.org/feed/"],
     "societa": ["https://www.commondreams.org/rss.xml", "https://www.pewresearch.org/feed/"],
+    "ia": ["https://feeds.arstechnica.com/arstechnica/technology-lab/", "https://www.theregister.com/software/ai_ml/headlines.atom"],
+    "scuola": ["https://www.edsurge.com/articles_rss", "https://hechingerreport.org/feed/"],
+    "curiosita": ["https://www.atlasobscura.com/feeds/latest", "https://phys.org/rss-feed/"],
 }
 
 TOPIC_KEY_BY_LABEL = {t["label_it"].lower(): t["key"] for t in DEFAULT_TOPICS}

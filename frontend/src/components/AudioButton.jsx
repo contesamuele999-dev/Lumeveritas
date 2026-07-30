@@ -51,7 +51,7 @@ export default function AudioButton({ item = null, text = null, testid = "audio-
     <button
       data-testid={testid}
       onClick={onClick}
-      className="h-12 px-5 border border-border hover:border-foreground transition-colors font-mono-caps flex items-center gap-2"
+      className="h-10 md:h-12 px-3 md:px-5 border border-border hover:border-foreground transition-colors font-mono-caps flex items-center gap-2"
       title={lang === "it" ? "Ascolta" : "Listen"}
     >
       {state === "playing" ? <Pause className="w-4 h-4" /> :

@@ -7,8 +7,12 @@ import { Loader2, Sparkles } from "lucide-react";
 // Split text into word/non-word tokens so we can wrap only real words
 const TOKENIZER = /([\p{L}\p{N}][\p{L}\p{N}'’\-]{2,})/gu;
 
-export default function ClickableText({ text, className = "", contextText = null }) {
+// Quante volte si può scendere: parola → spiegazione → parola della spiegazione → …
+const MAX_DEPTH = 3;
+
+export default function ClickableText({ text, className = "", contextText = null, depth = 0 }) {
   if (!text) return null;
+  if (depth > MAX_DEPTH) return <span className={className}>{text}</span>;
   const parts = [];
   let last = 0;
   let m;
@@ -26,14 +30,14 @@ export default function ClickableText({ text, className = "", contextText = null
         p.t === "s" ? (
           <span key={i}>{p.v}</span>
         ) : (
-          <WordPopover key={i} word={p.v} contextText={contextText || text} />
+          <WordPopover key={i} word={p.v} contextText={contextText || text} depth={depth} />
         )
       )}
     </span>
   );
 }
 
-function WordPopover({ word, contextText }) {
+function WordPopover({ word, contextText, depth = 0 }) {
   const { lang } = useLang();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -69,7 +73,12 @@ function WordPopover({ word, contextText }) {
           {word}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 border border-foreground bg-popover" side="top" data-testid="word-popover">
+      <PopoverContent
+        className="w-80 max-w-[calc(100vw-2rem)] border border-foreground bg-popover"
+        side="top"
+        portal={depth === 0}
+        data-testid="word-popover"
+      >
         <div className="font-mono-caps text-accent text-[10px] mb-2 flex items-center gap-2">
           <Sparkles className="w-3 h-3" />
           {lang === "it" ? "SPIEGAZIONE" : "EXPLANATION"}
@@ -82,7 +91,12 @@ function WordPopover({ word, contextText }) {
           </div>
         )}
         {err && <div className="text-sm text-accent">{err}</div>}
-        {expl && <div className="text-sm leading-relaxed text-foreground/90">{expl}</div>}
+        {expl && (
+          <div className="text-sm leading-relaxed text-foreground/90">
+            {/* anche le parole della spiegazione sono cliccabili, fino a MAX_DEPTH */}
+            <ClickableText text={expl} contextText={expl} depth={depth + 1} />
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

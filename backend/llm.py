@@ -38,17 +38,33 @@ def sys_for(lang: str) -> str:
     return SYSTEM_IT if lang == "it" else SYSTEM_EN
 
 
-async def llm_text(session_id: str, system: str, user_text: str) -> str:
-    # session_id resta nella firma per compatibilità: ogni chiamata usa già una sessione
-    # nuova (new_session), quindi non c'è storico da mantenere.
+def sources_from(resp) -> list:
+    """Link reali delle pagine usate da Google Search grounding."""
+    out, seen = [], set()
+    try:
+        chunks = resp.candidates[0].grounding_metadata.grounding_chunks or []
+    except Exception:
+        return out
+    for ch in chunks:
+        web = getattr(ch, "web", None)
+        uri = getattr(web, "uri", None)
+        if uri and uri not in seen:
+            seen.add(uri)
+            out.append({"title": (getattr(web, "title", None) or uri)[:120], "url": uri})
+    return out[:12]
+
+
+async def _generate(system: str, user_text: str, grounded: bool = False):
+    # session_id resta nella firma pubblica per compatibilità: ogni chiamata usa già una
+    # sessione nuova (new_session), quindi non c'è storico da mantenere.
+    cfg = types.GenerateContentConfig(system_instruction=system)
+    if grounded:
+        cfg.tools = [types.Tool(google_search=types.GoogleSearch())]
     for attempt in range(RETRY_ATTEMPTS):
         try:
-            resp = await _client.aio.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=user_text,
-                config=types.GenerateContentConfig(system_instruction=system),
+            return await _client.aio.models.generate_content(
+                model=GEMINI_MODEL, contents=user_text, config=cfg,
             )
-            return resp.text or ""
         except Exception as e:
             msg = str(e).lower()
             if not _is_transient(msg):
@@ -61,8 +77,12 @@ async def llm_text(session_id: str, system: str, user_text: str) -> str:
             await asyncio.sleep(RETRY_BACKOFF[attempt])
 
 
-async def llm_json(session_id: str, system: str, user_text: str) -> dict:
-    text = await llm_text(session_id, system, user_text)
+async def llm_text(session_id: str, system: str, user_text: str) -> str:
+    resp = await _generate(system, user_text)
+    return resp.text or ""
+
+
+def _parse_json(text: str) -> dict:
     start = text.find('{')
     end = text.rfind('}')
     if start >= 0 and end > start:
@@ -78,6 +98,23 @@ async def llm_json(session_id: str, system: str, user_text: str) -> dict:
         except Exception:
             pass
     raise HTTPException(status_code=502, detail="AI parse error")
+
+
+async def llm_json(session_id: str, system: str, user_text: str) -> dict:
+    resp = await _generate(system, user_text)
+    return _parse_json(resp.text or "")
+
+
+async def llm_json_grounded(session_id: str, system: str, user_text: str):
+    """JSON + link reali delle fonti (Google Search grounding). -> (dict, [{title,url}])"""
+    try:
+        resp = await _generate(system, user_text, grounded=True)
+    except HTTPException as e:
+        if e.status_code != 502:  # sovraccarico/quota: inutile riprovare senza tool
+            raise
+        log.warning("grounding fallito, riprovo senza fonti")
+        return await llm_json(session_id, system, user_text), []
+    return _parse_json(resp.text or ""), sources_from(resp)
 
 
 def new_session(prefix: str) -> str:

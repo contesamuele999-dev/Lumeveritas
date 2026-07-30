@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import ClickableText from "@/components/ClickableText";
+import SourceLinks from "@/components/SourceLinks";
 import AudioButton from "@/components/AudioButton";
 import ShareButton from "@/components/ShareButton";
 import { Loader2, ArrowLeft, Landmark, BarChart3, BookOpen, ScrollText, Eye } from "lucide-react";
@@ -58,7 +59,7 @@ export default function PublicBriefingPage() {
         <meta name="twitter:image" content={ogImage} />
       </Helmet>
 
-      <article className="max-w-3xl space-y-10">
+      <article className="max-w-3xl space-y-6 md:space-y-10">
         <Link to="/" data-testid="public-back-link" className="font-mono-caps text-muted-foreground hover:text-accent flex items-center gap-2 w-fit">
           <ArrowLeft className="w-4 h-4" /> Lume Veritas
         </Link>
@@ -73,7 +74,7 @@ export default function PublicBriefingPage() {
               <Eye className="w-3.5 h-3.5" /> {viewsLabel}
             </span>
           </div>
-          <h1 className="font-serif-display text-4xl md:text-6xl leading-[1.02] tracking-tight">
+          <h1 className="font-serif-display text-3xl md:text-6xl leading-[1.02] tracking-tight">
             <ClickableText text={item.headline} contextText={item.summary} />
           </h1>
           <div className="text-lg md:text-xl text-foreground/85 leading-relaxed">
@@ -131,6 +132,8 @@ export default function PublicBriefingPage() {
             <div className="text-base md:text-lg leading-relaxed"><ClickableText text={item.context} /></div>
           </section>
         )}
+
+        <SourceLinks sources={item.sources} />
 
         <footer className="border-t border-border pt-8">
           <Link to="/" className="font-mono-caps text-accent link-underline">

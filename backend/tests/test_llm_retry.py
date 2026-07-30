@@ -56,7 +56,29 @@ def main():
         assert e.status_code == 502, e.status_code
     assert calls["n"] == 1, calls
 
-    print("OK - retry, esaurimento tentativi ed errore permanente si comportano come previsto")
+    # 4) sources_from: estrae i link web del grounding, deduplica, ignora chunk senza uri
+    class W:
+        def __init__(self, uri, title=None): self.uri, self.title = uri, title
+    class C:
+        def __init__(self, web): self.web = web
+    class GM:
+        def __init__(self, chunks): self.grounding_chunks = chunks
+    class Cand:
+        def __init__(self, chunks): self.grounding_metadata = GM(chunks)
+    class R:
+        def __init__(self, chunks): self.candidates = [Cand(chunks)]
+
+    got = llm.sources_from(R([C(W("https://a.it", "A")), C(W("https://a.it", "A")), C(W(None)), C(None)]))
+    assert got == [{"title": "A", "url": "https://a.it"}], got
+    assert llm.sources_from(FakeResp("nessun grounding")) == []
+
+    # 5) grounding fallito con 502: ricade su una chiamata normale, senza fonti
+    calls = _install([Exception("400 tool not supported"), '{"a": 1}'])
+    data, sources = asyncio.run(llm.llm_json_grounded("s", "sys", "ciao"))
+    assert (data, sources) == ({"a": 1}, []), (data, sources)
+    assert calls["n"] == 2, calls
+
+    print("OK - retry, esaurimento tentativi, errore permanente, fonti e fallback grounding")
 
 
 if __name__ == "__main__":

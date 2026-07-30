@@ -7,7 +7,7 @@ from db import db
 from models import (BriefingIn, BriefingItem, BriefingListOut, AskIn, AskOut,
                     ExplainIn, ExplainOut, ArticleQAIn, ArticleQA, DebateOut, DebateSide,
                     VerifyOut, VerifyCriterion)
-from llm import llm_json, llm_text, sys_for, new_session
+from llm import llm_json, llm_json_grounded, llm_text, sys_for, new_session
 from security import current_user
 from services.ratelimit import check_rate, client_key
 
@@ -80,7 +80,7 @@ Rispondi ESCLUSIVAMENTE con JSON valido:
 }}
 Nessun testo fuori dal JSON. Non inventare dati specifici se non ne sei sicuro."""
     session_id = new_session("briefing")
-    data = await llm_json(session_id, sys_for(language), prompt)
+    data, sources = await llm_json_grounded(session_id, sys_for(language), prompt)
     now = datetime.now(timezone.utc).isoformat()
     items = []
     for it in data.get("items", [])[:6]:
@@ -91,6 +91,9 @@ Nessun testo fuori dal JSON. Non inventare dati specifici se non ne sei sicuro."
             summary=it.get("summary", ""),
             key_facts=it.get("key_facts", []) or [],
             sources_hint=it.get("sources_hint", []) or [],
+            # ponytail: il grounding è per risposta, non per singola notizia → stesse fonti
+            # su tutti e 5 gli item. Per fonti per-articolo servirebbe una call per item.
+            sources=sources,
             language=language,
             generated_at=now,
         ))
@@ -148,12 +151,14 @@ Rispondi con JSON valido:
 }}
 Solo JSON, nessun altro testo."""
     session = new_session(f"deepdive-{briefing_id}")
-    data = await llm_json(session, sys_for(language), prompt)
+    data, sources = await llm_json_grounded(session, sys_for(language), prompt)
+    known = {s.get("url") for s in (doc.get("sources") or [])}
     updates = {
         "real_reasons": data.get("real_reasons"),
         "data_points": data.get("data_points", []) or [],
         "context": data.get("context"),
         "sources_hint": (doc.get("sources_hint") or []) + (data.get("sources_hint", []) or []),
+        "sources": (doc.get("sources") or []) + [s for s in sources if s["url"] not in known],
     }
     await db.briefings.update_one({"id": briefing_id}, {"$set": updates})
     doc.update(updates)
@@ -178,11 +183,12 @@ Rispondi con JSON valido:
 }}
 Solo JSON."""
     session = new_session("ask")
-    data = await llm_json(session, sys_for(inp.language), prompt)
+    data, sources = await llm_json_grounded(session, sys_for(inp.language), prompt)
     return AskOut(
         answer=data.get("answer", ""),
         key_points=data.get("key_points", []) or [],
         caveats=data.get("caveats", []) or [],
+        sources=sources,
     )
 
 
