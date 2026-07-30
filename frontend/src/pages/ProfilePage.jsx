@@ -21,6 +21,10 @@ export default function ProfilePage() {
   const [newTopicSource, setNewTopicSource] = useState("");
   const [digestFreq, setDigestFreq] = useState("daily");
   const [addingTopic, setAddingTopic] = useState(false);
+  const [digestStatus, setDigestStatus] = useState(null);
+
+  const loadDigestStatus = () =>
+    api.get("/digest/status").then(({ data }) => setDigestStatus(data)).catch(() => {});
 
   useEffect(() => {
     api.get("/topics").then(({ data }) => setTopics(data));
@@ -33,6 +37,7 @@ export default function ProfilePage() {
         setDigest(!!data.digest_enabled);
         setDigestFreq(data.digest_frequency || "daily");
       }).catch(() => {});
+      loadDigestStatus();
     }
   }, [user]);
 
@@ -42,6 +47,7 @@ export default function ProfilePage() {
     try {
       await api.put("/digest/preferences", { enabled: next });
       setDigest(next);
+      loadDigestStatus();
       toast.success(next ? t(lang, "digest_enable") : t(lang, "digest_disable"));
     } catch (e) {
       toast.error(t(lang, "error_generic"));
@@ -63,6 +69,7 @@ export default function ProfilePage() {
     setSendingNow(true);
     try {
       const { data } = await api.post("/digest/send-now");
+      loadDigestStatus();
       if (data?.ok) {
         toast.success(t(lang, "digest_sent"));
       } else {
@@ -319,6 +326,40 @@ export default function ProfilePage() {
             {t(lang, "digest_send_now")}
           </button>
         </div>
+
+        {digestStatus && (
+          <div className="mt-5 border border-border p-4 text-sm space-y-1" data-testid="digest-status">
+            <div className="font-mono-caps text-muted-foreground text-[10px] mb-2">
+              {lang === "it" ? "Stato invii" : "Delivery status"}
+            </div>
+            <div className="text-foreground/80">
+              {lang === "it" ? "Ultimo invio riuscito: " : "Last successful send: "}
+              <span className="tabular">
+                {digestStatus.last_ok_at
+                  ? new Date(digestStatus.last_ok_at).toLocaleString(lang === "it" ? "it-IT" : "en-US")
+                  : (lang === "it" ? "mai" : "never")}
+              </span>
+            </div>
+            {digestStatus.last_error && (
+              <div className="text-accent">
+                {lang === "it" ? "Ultimo errore: " : "Last error: "}
+                {digestStatus.last_error === "maileroo_key_missing"
+                  ? (lang === "it" ? "servizio email non configurato (MAILEROO_API_KEY)" : "email service not configured (MAILEROO_API_KEY)")
+                  : digestStatus.last_error}
+              </div>
+            )}
+            {!digestStatus.enabled && (
+              <div className="text-accent">
+                {lang === "it" ? "Il digest è disattivato: attivalo qui sopra." : "Digest is off: enable it above."}
+              </div>
+            )}
+            {digestStatus.topics?.length > 0 && (
+              <div className="text-muted-foreground">
+                {lang === "it" ? "Argomenti inclusi: " : "Topics included: "}{digestStatus.topics.length}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="border-t border-border pt-8">

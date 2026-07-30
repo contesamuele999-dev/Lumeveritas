@@ -1,13 +1,18 @@
 """Digest builder + sender + scheduled jobs."""
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 from maileroo import MailerooClient, EmailAddress
 
 from config import MAILEROO_API_KEY, SENDER_EMAIL, SENDER_NAME, PUBLIC_APP_URL
 from db import db
 from log import log
 from models import BriefingIn, DEFAULT_TOPICS
+from services.digest_rules import DIGEST_HOUR, is_due
+
+TZ = ZoneInfo("Europe/Rome")
+MAX_TOPICS_PER_DIGEST = 6
 
 mailer = MailerooClient(MAILEROO_API_KEY) if MAILEROO_API_KEY else None
 
@@ -59,10 +64,19 @@ def _digest_html(user_name: str, lang: str, sections: list) -> str:
 </body></html>"""
 
 
+def _digest_topic_keys(user_doc: dict) -> list:
+    """Argomenti del digest: prima TUTTI i personalizzati dell'utente, poi i preferiti
+    standard. I custom sono il motivo per cui uno si iscrive: non devono mai cadere fuori
+    dal taglio."""
+    custom_keys = [t["key"] for t in (user_doc.get("custom_topics") or [])]
+    preferred = user_doc.get("preferred_topics") or [t["key"] for t in DEFAULT_TOPICS[:4]]
+    keys = custom_keys + [k for k in preferred if k not in custom_keys]
+    return keys[:MAX_TOPICS_PER_DIGEST]
+
+
 async def build_digest_for_user(user_doc: dict, run_briefing_fn) -> Optional[dict]:
     lang = user_doc.get("language", "it")
-    topic_keys = user_doc.get("preferred_topics") or [t["key"] for t in DEFAULT_TOPICS[:4]]
-    topic_keys = topic_keys[:4]
+    topic_keys = _digest_topic_keys(user_doc)
     all_topics = list(DEFAULT_TOPICS) + list(user_doc.get("custom_topics") or [])
     by_key = {t["key"]: t for t in all_topics}
     sections = []
@@ -86,11 +100,23 @@ async def build_digest_for_user(user_doc: dict, run_briefing_fn) -> Optional[dic
     return {"lang": lang, "html": _digest_html(user_doc.get("name") or user_doc["email"].split("@")[0], lang, sections)}
 
 
-async def send_digest_to_user(user_doc: dict, run_briefing_fn) -> tuple[bool, Optional[str]]:
+async def _log_attempt(user_doc: dict, kind: str, ok: bool, error: Optional[str] = None, ref=None):
+    await db.digest_log.insert_one({
+        "user_id": user_doc["id"], "email": user_doc["email"],
+        "kind": kind, "ok": ok, "error": error, "maileroo_ref": ref,
+        "day": datetime.now(TZ).date().isoformat(),
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def send_digest_to_user(user_doc: dict, run_briefing_fn, kind: str = "manual") -> tuple[bool, Optional[str]]:
     if not mailer:
+        log.error("digest: MAILEROO_API_KEY mancante, nessuna email può partire")
+        await _log_attempt(user_doc, kind, False, "maileroo_key_missing")
         return False, "maileroo_key_missing"
     payload = await build_digest_for_user(user_doc, run_briefing_fn)
     if not payload:
+        await _log_attempt(user_doc, kind, False, "no_content")
         return False, "no_content"
     freq = user_doc.get("digest_frequency", "daily")
     if freq == "weekly":
@@ -105,41 +131,56 @@ async def send_digest_to_user(user_doc: dict, run_briefing_fn) -> tuple[bool, Op
     }
     try:
         ref = await asyncio.to_thread(mailer.send_basic_email, params)
-        await db.digest_log.insert_one({
-            "user_id": user_doc["id"], "email": user_doc["email"],
-            "sent_at": datetime.now(timezone.utc).isoformat(),
-            "maileroo_ref": ref,
-        })
+        await _log_attempt(user_doc, kind, True, ref=ref)
         return True, None
     except Exception as e:
         msg = str(e)
         log.error(f"Maileroo send failed to {user_doc['email']}: {msg}")
+        await _log_attempt(user_doc, kind, False, msg[:220])
         return False, msg[:220]
 
 
-def make_digest_jobs(run_briefing_fn):
-    async def run_daily_digest():
-        log.info("Running daily digest job")
-        cursor = db.users.find({"digest_enabled": True, "$or": [{"digest_frequency": "daily"}, {"digest_frequency": {"$exists": False}}]}, {"_id": 0, "password_hash": 0})
+async def digest_state(user_id: str) -> dict:
+    """Ultimo invio automatico riuscito + tentativi di oggi. Serve al job e a /digest/status."""
+    today = datetime.now(TZ).date().isoformat()
+    last_ok = await db.digest_log.find_one(
+        {"user_id": user_id, "kind": "auto", "ok": True}, {"_id": 0}, sort=[("sent_at", -1)]
+    )
+    attempts = await db.digest_log.count_documents({"user_id": user_id, "kind": "auto", "day": today})
+    last_any = await db.digest_log.find_one({"user_id": user_id}, {"_id": 0}, sort=[("sent_at", -1)])
+    return {"last_ok": last_ok, "attempts_today": attempts, "last_any": last_any}
+
+
+def make_digest_job(run_briefing_fn):
+    """Un solo job, eseguito a intervalli: manda a chi è "in ritardo" per oggi.
+
+    Sostituisce i due cron alle 06:00: su Render free l'istanza dorme e un cron a orario
+    fisso salta silenziosamente la giornata. Qui, appena il processo è vivo dopo le 06:00,
+    il digest parte; il marker per giorno impedisce doppi invii.
+    """
+    async def run_due_digests():
+        now = datetime.now(TZ)
+        if now.hour < DIGEST_HOUR:
+            return
+        cursor = db.users.find({"digest_enabled": True}, {"_id": 0, "password_hash": 0})
         users = await cursor.to_list(1000)
-        log.info(f"Daily digest recipients: {len(users)}")
+        sent = 0
         for u in users:
             try:
-                await send_digest_to_user(u, run_briefing_fn)
+                state = await digest_state(u["id"])
+                last_ok = state["last_ok"]
+                last_ok_day = date.fromisoformat(last_ok["day"]) if last_ok and last_ok.get("day") else None
+                if not is_due(now, u.get("digest_frequency", "daily"), last_ok_day, state["attempts_today"]):
+                    continue
+                ok, err = await send_digest_to_user(u, run_briefing_fn, kind="auto")
+                if ok:
+                    sent += 1
+                else:
+                    log.error(f"digest non inviato a {u.get('email')}: {err}")
                 await asyncio.sleep(2)
             except Exception as e:
                 log.error(f"digest error for {u.get('email')}: {e}")
+        if sent:
+            log.info(f"Digest inviati: {sent}")
 
-    async def run_weekly_digest():
-        log.info("Running weekly digest job")
-        cursor = db.users.find({"digest_enabled": True, "digest_frequency": "weekly"}, {"_id": 0, "password_hash": 0})
-        users = await cursor.to_list(1000)
-        log.info(f"Weekly digest recipients: {len(users)}")
-        for u in users:
-            try:
-                await send_digest_to_user(u, run_briefing_fn)
-                await asyncio.sleep(2)
-            except Exception as e:
-                log.error(f"weekly digest error for {u.get('email')}: {e}")
-
-    return run_daily_digest, run_weekly_digest
+    return run_due_digests

@@ -76,11 +76,20 @@ git push -u origin main
 ## 6. Tenere sveglio il backend (importante)
 
 Il piano free di Render mette il servizio in standby dopo 15 minuti di inattività:
-il primo caricamento successivo impiega ~50 secondi, e **lo scheduler dei digest
-(08:00 Europe/Rome) non parte se il servizio dorme**.
+il primo caricamento successivo impiega ~50 secondi, e **mentre dorme non gira nessun
+job in background**.
+
+Il digest non usa più un cron alle 06:00 in punto (che con l'istanza addormentata
+saltava la giornata in silenzio): un job controlla ogni 10 minuti chi non ha ancora
+ricevuto il digest di oggi e lo manda al primo risveglio dopo le 06:00 Europe/Rome.
+Il ping resta comunque consigliato per averlo puntuale.
 
 Fix gratis: https://uptimerobot.com → Add New Monitor → HTTP(s) →
 URL `https://lume-veritas-api.onrender.com/api/` → intervallo 5 minuti.
+
+Per capire perché un digest non è arrivato: `GET /api/digest/status` (autenticato) oppure
+la sezione "Stato invii" nel Profilo — riporta ultimo invio riuscito, ultimo errore e
+se il servizio email è configurato.
 
 ## 7. Sviluppo locale
 

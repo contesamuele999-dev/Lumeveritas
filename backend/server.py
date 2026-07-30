@@ -1,5 +1,7 @@
 import logging
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -7,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import CORS_ORIGINS
 from db import close_db
 from log import log
-from services.digest import make_digest_jobs
+from services.digest import make_digest_job
 from services.migrations import run_startup_migrations
 from routers import auth, topics, news, saved, rss, public, digest as digest_router
 from routers.news import run_briefing
@@ -49,12 +51,13 @@ scheduler: Optional[AsyncIOScheduler] = None
 async def _startup():
     global scheduler
     await run_startup_migrations()
-    run_daily, run_weekly = make_digest_jobs(run_briefing)
+    run_due = make_digest_job(run_briefing)
     scheduler = AsyncIOScheduler(timezone="Europe/Rome")
-    scheduler.add_job(run_daily, "cron", hour=8, minute=0, id="daily_digest")
-    scheduler.add_job(run_weekly, "cron", day_of_week="mon", hour=8, minute=0, id="weekly_digest")
+    # ogni 10 minuti, non alle 06:00 in punto: se l'istanza dormiva, recupera al risveglio
+    scheduler.add_job(run_due, "interval", minutes=10, id="digest_due",
+                      next_run_time=datetime.now(ZoneInfo("Europe/Rome")), coalesce=True, max_instances=1)
     scheduler.start()
-    log.info("Scheduler started (daily 08:00, weekly Mon 08:00 Europe/Rome)")
+    log.info("Scheduler started (digest dalle 06:00 Europe/Rome, controllo ogni 10 min)")
 
 
 @app.on_event("shutdown")
