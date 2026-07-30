@@ -109,6 +109,18 @@ export default function VerifyPanel({ briefingId }) {
         </button>
       </div>
 
+      {/* Promemoria: il consenso delle fonti non è una prova */}
+      <div className="border-l-2 border-accent pl-4 py-1" data-testid="verify-disclaimer">
+        <div className="font-mono-caps text-accent text-[10px] mb-1.5 flex items-center gap-1.5">
+          <Info className="w-3 h-3" /> {lang === "it" ? "Tienilo a mente" : "Keep in mind"}
+        </div>
+        <p className="text-sm text-foreground/80 leading-relaxed">
+          {lang === "it"
+            ? "Una notizia ripresa da tante fonti non è vera per questo: le fonti si copiano tra loro e possono sbagliare tutte insieme. E una notizia riportata da poche fonti, anche poco affidabili, non è falsa per questo. Questo punteggio dice quanto è verificabile ciò che leggi, non se è vero. Decidi tu, guardando le prove."
+            : "A story carried by many outlets isn't true because of that: outlets copy each other and can all be wrong together. And a story carried by few outlets, even unreliable ones, isn't false because of that. This score tells you how verifiable the claims are, not whether they're true. Look at the evidence and judge for yourself."}
+        </p>
+      </div>
+
       {/* Criteria bars */}
       <section>
         <div className="font-mono-caps text-accent mb-4">

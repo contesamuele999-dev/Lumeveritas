@@ -1,9 +1,19 @@
 """Regole pure di scheduling del digest (nessuna dipendenza da DB/mail: testabili da sole)."""
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 DIGEST_HOUR = 6            # 06:00 Europe/Rome
 MAX_ATTEMPTS_PER_DAY = 3   # invii falliti: si riprova, ma non all'infinito
+
+
+def rome_tz():
+    """Europe/Rome, con fallback a UTC se manca il database dei fusi (pacchetto `tzdata`).
+    Meglio un digest un'ora spostata che l'intera app che non parte."""
+    try:
+        return ZoneInfo("Europe/Rome")
+    except Exception:
+        return timezone.utc
 
 
 def is_due(now: datetime, frequency: str, last_ok_day: Optional[date], attempts_today: int = 0) -> bool:

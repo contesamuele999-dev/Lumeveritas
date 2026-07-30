@@ -1,20 +1,24 @@
 """Digest builder + sender + scheduled jobs."""
 import asyncio
 from datetime import date, datetime, timezone
+from html import escape
 from typing import Optional
-from zoneinfo import ZoneInfo
 from maileroo import MailerooClient, EmailAddress
 
 from config import MAILEROO_API_KEY, SENDER_EMAIL, SENDER_NAME, PUBLIC_APP_URL
 from db import db
 from log import log
 from models import BriefingIn, DEFAULT_TOPICS
-from services.digest_rules import DIGEST_HOUR, is_due
+from services.digest_rules import DIGEST_HOUR, is_due, rome_tz
 
-TZ = ZoneInfo("Europe/Rome")
+TZ = rome_tz()
 MAX_TOPICS_PER_DIGEST = 6
 
 mailer = MailerooClient(MAILEROO_API_KEY) if MAILEROO_API_KEY else None
+
+
+def _article_url(briefing_id: str) -> str:
+    return f"{PUBLIC_APP_URL.rstrip('/')}/s/{briefing_id}"
 
 
 def _digest_html(user_name: str, lang: str, sections: list) -> str:
@@ -24,18 +28,23 @@ def _digest_html(user_name: str, lang: str, sections: list) -> str:
     lbl_footer = ("Ricevi questa email perché hai attivato il digest su Lume Veritas. "
                   "Per disattivarlo, vai su Profilo → Digest.") if lang == "it" else \
                  ("You get this because you enabled digest on Lume Veritas. Disable it in Profile → Digest.")
+    lbl_more = "Approfondisci →" if lang == "it" else "Read the deep dive →"
     blocks = []
     for sec in sections:
+        # titolo cliccabile: porta alla pagina di approfondimento della singola notizia
         items_html = "".join(
             f"""<tr><td style="padding:12px 0;border-bottom:1px solid #e2e2d9;">
-                <div style="font-family:Georgia,serif;font-size:20px;line-height:1.25;color:#111;margin-bottom:6px;">{it['headline']}</div>
-                <div style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.5;">{it['summary']}</div>
+                <a href="{_article_url(it['id'])}" style="text-decoration:none;">
+                  <div style="font-family:Georgia,serif;font-size:20px;line-height:1.25;color:#111;margin-bottom:6px;">{escape(it['headline'])}</div>
+                </a>
+                <div style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.5;">{escape(it['summary'])}</div>
+                <a href="{_article_url(it['id'])}" style="font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#D9381E;text-decoration:none;display:inline-block;margin-top:8px;">{lbl_more}</a>
             </td></tr>"""
             for it in sec["items"][:3]
         )
         blocks.append(f"""
         <tr><td style="padding:24px 0 8px;">
-            <div style="font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#D9381E;">{sec['topic']}</div>
+            <div style="font-family:Arial,sans-serif;font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:#D9381E;">{escape(sec['topic'])}</div>
         </td></tr>
         {items_html}
         """)
