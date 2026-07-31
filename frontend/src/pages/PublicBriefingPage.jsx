@@ -20,15 +20,57 @@ export default function PublicBriefingPage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    let alive = true;
+    let deepTimer = null;
+
+    // Il backend su piano free può dormire: il primo tentativo va in timeout, non è un 404.
+    const fetchItem = async (attempt = 0) => {
+      try {
+        const { data } = await api.get(`/public/${id}`, { timeout: 60000 });
+        if (!alive) return;
+        setItem(data);
+        setError(null);
+        setLoading(false);
+        // l'approfondimento viene generato in background: si ricontrolla una volta
+        if (!data.real_reasons) {
+          deepTimer = setTimeout(async () => {
+            try {
+              const { data: fresh } = await api.get(`/public/${id}`, { timeout: 60000 });
+              if (alive && fresh.real_reasons) setItem(fresh);
+            } catch { /* opzionale: si tiene la versione base */ }
+          }, 12000);
+        }
+      } catch (e) {
+        if (!alive) return;
+        if (e?.response?.status === 404) {
+          setError(lang === "it" ? "Notizia non trovata o non più disponibile." : "Story not found or no longer available.");
+          setLoading(false);
+          return;
+        }
+        if (attempt < 2) {
+          setTimeout(() => fetchItem(attempt + 1), 3000);
+          return;
+        }
+        setError(t(lang, "error_generic"));
+        setLoading(false);
+      }
+    };
+
     setLoading(true);
-    api.get(`/public/${id}`)
-      .then(({ data }) => setItem(data))
-      .catch(() => setError(t(lang, "error_generic")))
-      .finally(() => setLoading(false));
+    setError(null);
+    fetchItem();
+    return () => { alive = false; if (deepTimer) clearTimeout(deepTimer); };
   }, [id, lang]);
 
   if (loading) return <div className="py-24 flex items-center gap-3 text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin" /> {t(lang, "loading")}</div>;
-  if (error || !item) return <div className="py-24 text-center font-mono-caps text-muted-foreground">{error || "Not found"}</div>;
+  if (error || !item) return (
+    <div className="py-24 text-center space-y-4">
+      <div className="font-mono-caps text-muted-foreground">{error || (lang === "it" ? "Notizia non trovata" : "Story not found")}</div>
+      <Link to="/" className="font-mono-caps text-accent link-underline inline-block">
+        {lang === "it" ? "Vai a Lume Veritas →" : "Go to Lume Veritas →"}
+      </Link>
+    </div>
+  );
 
   const shareUrl = `${window.location.origin}/s/${item.id}`;
   const ogImage = `${API_BASE}/api/og/${item.id}.png`;

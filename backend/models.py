@@ -40,6 +40,9 @@ class BriefingIn(BaseModel):
 class SourceLink(BaseModel):
     title: str
     url: str
+    # dominio reale della fonte (es. "reuters.com"): il grounding di Gemini restituisce
+    # URL di redirect tutti uguali (vertexaisearch.cloud.google.com/...), inutili da mostrare.
+    domain: Optional[str] = None
 
 class BriefingItem(BaseModel):
     id: str

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import Response
 from db import db
 from log import log
@@ -9,17 +9,23 @@ from routers.news import deep_dive
 router = APIRouter(prefix="/api", tags=["public"])
 
 
+async def _deep_dive_bg(briefing_id: str):
+    try:
+        await deep_dive(briefing_id)
+    except Exception as e:
+        log.warning(f"public deep-dive in background fallito: {e}")
+
+
 @router.get("/public/{briefing_id}", response_model=BriefingItem)
-async def public_briefing(briefing_id: str):
+async def public_briefing(briefing_id: str, background: BackgroundTasks):
     doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Notizia non trovata")
+    # L'approfondimento è una chiamata LLM da decine di secondi: farlo qui significava
+    # far scadere la richiesta (o il cold start di Render) e mostrare "Not found" a chi
+    # arriva dal link dell'email. Si risponde subito e si genera in background.
     if not doc.get("real_reasons"):
-        try:
-            await deep_dive(briefing_id)
-            doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
-        except Exception as e:
-            log.warning(f"public deep-dive skipped: {e}")
+        background.add_task(_deep_dive_bg, briefing_id)
     try:
         await db.briefings.update_one({"id": briefing_id}, {"$inc": {"views": 1}})
         doc["views"] = int(doc.get("views", 0)) + 1

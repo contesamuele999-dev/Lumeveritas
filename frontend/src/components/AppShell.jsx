@@ -123,12 +123,10 @@ export default function AppShell() {
         ))}
       </nav>
 
-      <div className="md:hidden h-16" />
-
       <InstallPrompt />
 
-      {/* Footer */}
-      <footer className="border-t border-border mt-10 md:mt-16 py-6 md:py-8 max-w-[1400px] mx-auto px-4 md:px-10 relative z-10">
+      {/* Footer — su mobile lo spazio in fondo evita che la firma finisca sotto la nav fissa */}
+      <footer className="border-t border-border mt-10 md:mt-16 pt-6 md:pt-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8 max-w-[1400px] mx-auto px-4 md:px-10 relative z-10">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="font-mono-caps text-muted-foreground">Lume Veritas — {new Date().getFullYear()}</div>
           <div className="text-sm text-muted-foreground max-w-xl">

@@ -1,4 +1,7 @@
 import asyncio, json, uuid
+from urllib.parse import urlparse
+
+import httpx
 from fastapi import HTTPException
 from google import genai
 from google.genai import types
@@ -38,6 +41,19 @@ def sys_for(lang: str) -> str:
     return SYSTEM_IT if lang == "it" else SYSTEM_EN
 
 
+# Il grounding di Gemini non restituisce l'URL della fonte ma un redirect firmato,
+# identico per tutte le fonti tranne il token finale: mostrarlo all'utente è inutile.
+REDIRECT_HOSTS = ("vertexaisearch.cloud.google.com", "www.google.com", "google.com")
+
+
+def _domain_of(url: str) -> str:
+    try:
+        host = (urlparse(url).hostname or "").replace("www.", "", 1)
+    except Exception:
+        return ""
+    return "" if host in REDIRECT_HOSTS else host
+
+
 def sources_from(resp) -> list:
     """Link reali delle pagine usate da Google Search grounding."""
     out, seen = [], set()
@@ -50,8 +66,51 @@ def sources_from(resp) -> list:
         uri = getattr(web, "uri", None)
         if uri and uri not in seen:
             seen.add(uri)
-            out.append({"title": (getattr(web, "title", None) or uri)[:120], "url": uri})
+            title = (getattr(web, "title", None) or "").strip()
+            # spesso il "title" del chunk È già il dominio della fonte (es. "reuters.com")
+            domain = _domain_of(uri) or (title if "." in title and " " not in title else "")
+            out.append({
+                "title": (title or domain or uri)[:120],
+                "url": uri,
+                "domain": domain or None,
+            })
     return out[:12]
+
+
+async def resolve_sources(sources: list) -> list:
+    """Segue i redirect di grounding per ricavare URL e dominio reali della fonte.
+
+    Best-effort: se la rete non risponde entro pochi secondi si tengono i dati originali,
+    perché una fonte con etichetta imperfetta è meglio di una risposta lenta.
+    """
+    todo = [s for s in sources if not s.get("domain")]
+    if not todo:
+        return sources
+
+    async def one(client, s):
+        try:
+            r = await client.get(s["url"])
+            final = str(r.url)
+            dom = _domain_of(final)
+            if dom:
+                s["url"] = final
+                s["domain"] = dom
+                if not s.get("title") or s["title"].startswith("http"):
+                    s["title"] = dom
+        except Exception:
+            pass
+
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=5.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; LumeVeritas/1.0)"},
+        ) as client:
+            await asyncio.wait_for(
+                asyncio.gather(*[one(client, s) for s in todo]), timeout=8.0
+            )
+    except Exception as e:
+        log.warning(f"resolve_sources parziale: {e}")
+    return sources
 
 
 async def _generate(system: str, user_text: str, grounded: bool = False):
@@ -114,7 +173,7 @@ async def llm_json_grounded(session_id: str, system: str, user_text: str):
             raise
         log.warning("grounding fallito, riprovo senza fonti")
         return await llm_json(session_id, system, user_text), []
-    return _parse_json(resp.text or ""), sources_from(resp)
+    return _parse_json(resp.text or ""), await resolve_sources(sources_from(resp))
 
 
 def new_session(prefix: str) -> str:
