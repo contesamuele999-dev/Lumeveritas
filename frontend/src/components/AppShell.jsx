@@ -21,7 +21,7 @@ export default function AppShell() {
   return (
     <div className="App min-h-screen grain relative">
       {/* HEADER */}
-      <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border">
+      <header data-app-header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border">
         <div className="max-w-[1400px] mx-auto px-4 md:px-10 py-2.5 md:py-4 flex items-center gap-3 md:gap-6">
           <button
             data-testid="brand-home-btn"
@@ -31,7 +31,7 @@ export default function AppShell() {
             <div className="w-8 h-8 md:w-10 md:h-10 shrink-0 bg-foreground text-background flex items-center justify-center font-serif-display text-xl font-semibold">L</div>
             <div className="hidden sm:block text-left leading-tight">
               <div className="font-serif-display text-xl md:text-2xl font-semibold tracking-tight">Lume Veritas</div>
-              <div className="font-mono-caps text-muted-foreground">{t(lang, "tagline")}</div>
+              <div data-app-tagline className="font-mono-caps text-muted-foreground">{t(lang, "tagline")}</div>
             </div>
           </button>
 
@@ -78,7 +78,7 @@ export default function AppShell() {
         </div>
 
         {/* Desktop tab-bar */}
-        <nav className="hidden md:block border-t border-border">
+        <nav data-app-tabbar className="hidden md:block border-t border-border">
           <div className="max-w-[1400px] mx-auto px-10 flex items-center gap-0">
             {links.map((l) => (
               <NavLink
@@ -100,12 +100,15 @@ export default function AppShell() {
       </header>
 
       {/* MAIN */}
-      <main className="max-w-[1400px] mx-auto px-4 md:px-10 py-5 md:py-12 relative z-10">
+      <main data-app-main className="max-w-[1400px] mx-auto px-4 md:px-10 py-5 md:py-12 relative z-10 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         <Outlet />
       </main>
 
       {/* MOBILE BOTTOM NAV */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-background border-t border-border grid grid-cols-4 pb-[env(safe-area-inset-bottom)]">
+      <nav
+        data-app-bottomnav
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-background border-t border-border grid grid-cols-4 pb-[env(safe-area-inset-bottom)] px-[env(safe-area-inset-left)]"
+      >
         {links.map((l) => (
           <NavLink
             key={l.to}
@@ -126,9 +129,11 @@ export default function AppShell() {
       <InstallPrompt />
 
       {/* Footer — su mobile lo spazio in fondo evita che la firma finisca sotto la nav fissa */}
-      <footer className="border-t border-border mt-10 md:mt-16 pt-6 md:pt-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8 max-w-[1400px] mx-auto px-4 md:px-10 relative z-10">
+      <footer data-app-footer className="border-t border-border mt-10 md:mt-16 pt-6 md:pt-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8 max-w-[1400px] mx-auto px-4 md:px-10 relative z-10">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-          <div className="font-mono-caps text-muted-foreground">Lume Veritas — {new Date().getFullYear()}</div>
+          <div className="font-mono-caps text-muted-foreground">
+            © Lume Veritas — {new Date().getFullYear()}
+          </div>
           <div className="text-sm text-muted-foreground max-w-xl">
             {t(lang, "no_data_note")}
           </div>

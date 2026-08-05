@@ -13,7 +13,8 @@ export default function RssFeed({ topic }) {
     if (!topic) return;
     setLoading(true); setItems([]);
     const label = lang === "it" ? topic.label_it : topic.label_en;
-    api.get(`/rss/feed?topic=${encodeURIComponent(label)}&limit=8`)
+    // lang serve al backend sia per scegliere le fonti sia per tradurre quelle straniere
+    api.get(`/rss/feed?topic=${encodeURIComponent(label)}&limit=8&lang=${lang}`)
       .then(({ data }) => setItems(data.items || []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false));

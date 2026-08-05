@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Bookmark, BookmarkCheck, Sparkles, Users, ShieldCheck } from "lucide-react";
+import { Bookmark, BookmarkCheck, Sparkles, Users, ShieldCheck, History } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -94,6 +94,13 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
           className="h-10 md:h-12 px-3 md:px-5 border border-foreground bg-background hover:bg-foreground hover:text-background transition-colors font-mono-caps flex items-center gap-2"
         >
           <Users className="w-4 h-4" /> {t(lang, "debate_btn")}
+        </button>
+        <button
+          data-testid={`history-btn-${item.id}`}
+          onClick={() => { setInitialTab("history"); setOpenDeep(true); }}
+          className="h-10 md:h-12 px-3 md:px-5 border border-foreground bg-background hover:bg-foreground hover:text-background transition-colors font-mono-caps flex items-center gap-2"
+        >
+          <History className="w-4 h-4" /> {t(lang, "tab_history")}
         </button>
         <button
           data-testid={`verify-btn-${item.id}`}

@@ -1,2 +1,2 @@
-/* App-level styles are in index.css. This file is kept minimal on purpose. */
-.App { min-height: 100vh; }
+/* App-level styles are in index.css (compresa la regola .App con 100dvh per il
+   landscape su mobile). Questo file è tenuto minimo di proposito. */

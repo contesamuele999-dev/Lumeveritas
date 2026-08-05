@@ -110,6 +110,23 @@ class DebateOut(BaseModel):
     generated_at: str
 
 
+# -------------------- Storico / Timeline --------------------
+class TimelineEvent(BaseModel):
+    date: str            # "1991", "marzo 2014", "12 set 2023" — testo libero, non tutte le date sono precise
+    title: str
+    description: str
+    significance: Optional[str] = None
+
+class TimelineOut(BaseModel):
+    briefing_id: str
+    summary: str                       # il "sunto" che spiega come si è arrivati a oggi
+    events: List[TimelineEvent] = []
+    turning_points: List[str] = []     # i momenti che hanno cambiato traiettoria
+    open_questions: List[str] = []
+    language: str
+    generated_at: str
+
+
 # -------------------- Verification --------------------
 class VerifyCriterion(BaseModel):
     key: str
@@ -220,6 +237,30 @@ RSS_FEEDS = {
     "ia": ["https://feeds.arstechnica.com/arstechnica/technology-lab/", "https://www.theregister.com/software/ai_ml/headlines.atom"],
     "scuola": ["https://www.edsurge.com/articles_rss", "https://hechingerreport.org/feed/"],
     "curiosita": ["https://www.atlasobscura.com/feeds/latest", "https://phys.org/rss-feed/"],
+}
+
+# Fonti in lingua italiana: quando l'utente ha scelto "it" vengono messe in cima e non
+# hanno bisogno di traduzione. I feed che non rispondono vengono ignorati senza errori.
+RSS_FEEDS_IT = {
+    "mercati": ["https://www.wallstreetitalia.com/feed/", "https://www.milanofinanza.it/rss/mercati"],
+    "economia": ["https://www.wallstreetitalia.com/feed/", "https://www.ilfattoquotidiano.it/economia/feed/"],
+    "cripto": ["https://it.cointelegraph.com/rss", "https://www.criptovaluta.it/feed"],
+    "scienza": ["https://www.lescienze.it/rss/all/rss2.0.xml", "https://www.media.inaf.it/feed/"],
+    "tecnologia": ["https://www.wired.it/feed/rss", "https://www.dday.it/rss"],
+    "invenzioni": ["https://www.wired.it/feed/rss", "https://www.lescienze.it/rss/all/rss2.0.xml"],
+    "salute": ["https://www.quotidianosanita.it/rss/rss.php", "https://www.epicentro.iss.it/rss/rss.xml"],
+    "ambiente": ["https://greenreport.it/feed/", "https://www.rinnovabili.it/feed/"],
+    "geopolitica": ["https://www.lantidiplomatico.it/rss.xml", "https://www.limesonline.com/feed"],
+    "guerre": ["https://www.lantidiplomatico.it/rss.xml", "https://www.limesonline.com/feed"],
+    "politica": ["https://www.ilfattoquotidiano.it/politica-palazzo/feed/", "https://www.valigiablu.it/feed/"],
+    "leggi": ["https://www.ilfattoquotidiano.it/politica-palazzo/feed/", "https://www.valigiablu.it/feed/"],
+    "sondaggi": ["https://www.ilpost.it/feed/", "https://www.valigiablu.it/feed/"],
+    "statistiche": ["https://www.istat.it/comunicato-stampa/feed/", "https://www.ilpost.it/feed/"],
+    "popolazione": ["https://www.istat.it/comunicato-stampa/feed/", "https://www.internazionale.it/sitemaps/rss.xml"],
+    "societa": ["https://www.internazionale.it/sitemaps/rss.xml", "https://www.ilpost.it/feed/"],
+    "ia": ["https://www.wired.it/feed/rss", "https://www.dday.it/rss"],
+    "scuola": ["https://www.orizzontescuola.it/feed/", "https://www.tecnicadellascuola.it/feed"],
+    "curiosita": ["https://www.focus.it/rss/tutti.rss", "https://www.ilpost.it/feed/"],
 }
 
 TOPIC_KEY_BY_LABEL = {t["label_it"].lower(): t["key"] for t in DEFAULT_TOPICS}

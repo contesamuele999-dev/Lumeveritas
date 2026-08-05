@@ -1,11 +1,13 @@
 import asyncio, json, uuid
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
 from google import genai
 from google.genai import types
-from config import GEMINI_API_KEY, GEMINI_MODEL
+from config import (GEMINI_API_KEY, GEMINI_MODEL,
+                    GROQ_API_KEY, GROQ_MODEL, GROQ_MODEL_FALLBACK)
 from log import log
 
 _client = genai.Client(api_key=GEMINI_API_KEY)
@@ -36,9 +38,37 @@ SYSTEM_EN = (
     "Always answer in English."
 )
 
+# Senza questa nota il modello scambia l'anno del proprio addestramento per il presente e
+# scrive cose come "dal punto di vista attuale (2024)". La data va iniettata a ogni chiamata.
+_MONTHS_IT = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
+              "agosto", "settembre", "ottobre", "novembre", "dicembre")
+
+
+def today_note(lang: str) -> str:
+    now = datetime.now(timezone.utc)
+    if lang == "it":
+        return (
+            f"\n\nDATA ODIERNA: {now.day} {_MONTHS_IT[now.month - 1]} {now.year} "
+            f"(ISO {now.date().isoformat()}). "
+            f"«Oggi», «attualmente», «l'anno in corso» significano SEMPRE {now.year}. "
+            "Non scrivere mai che l'anno corrente è quello del tuo addestramento e non "
+            f"aggiungere fra parentesi anni diversi da {now.year} per indicare il presente. "
+            "Se le tue conoscenze si fermano prima di questa data, dillo esplicitamente "
+            "indicando fino a quando arrivano, invece di presentare dati vecchi come attuali."
+        )
+    return (
+        f"\n\nTODAY'S DATE: {now.date().isoformat()}. "
+        f"\"Today\", \"currently\" and \"this year\" always mean {now.year}. "
+        "Never state that the current year is your training cutoff year, and never put a "
+        f"parenthetical year other than {now.year} to mean the present. "
+        "If your knowledge stops earlier, say so explicitly and state how far it goes, "
+        "instead of presenting stale data as current."
+    )
+
 
 def sys_for(lang: str) -> str:
-    return SYSTEM_IT if lang == "it" else SYSTEM_EN
+    base = SYSTEM_IT if lang == "it" else SYSTEM_EN
+    return base + today_note(lang)
 
 
 # Il grounding di Gemini non restituisce l'URL della fonte ma un redirect firmato,
@@ -113,7 +143,57 @@ async def resolve_sources(sources: list) -> list:
     return sources
 
 
-async def _generate(system: str, user_text: str, grounded: bool = False):
+# ---------------------------------------------------------------- fallback Groq
+# Quando Gemini è sovraccarico l'utente vedeva un errore secco. Groq ha un tier gratuito
+# rapido e compatibile con l'API OpenAI: basta per Q&A, dibattito, storico e traduzioni.
+# Non ha grounding web, quindi le risposte generate dal fallback arrivano senza fonti.
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+
+class _FallbackResp:
+    """Sagoma minima della risposta Gemini: i chiamanti usano solo `.text`."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.candidates = []
+
+
+async def _groq_generate(system: str, user_text: str, json_mode: bool = False):
+    if not GROQ_API_KEY:
+        return None
+    payload_base = {
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_text},
+        ],
+        "temperature": 0.6,
+        "max_tokens": 4096,
+    }
+    if json_mode:
+        payload_base["response_format"] = {"type": "json_object"}
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for model in (GROQ_MODEL, GROQ_MODEL_FALLBACK):
+                if not model:
+                    continue
+                try:
+                    r = await client.post(GROQ_URL, headers=headers, json={**payload_base, "model": model})
+                    if r.status_code >= 400:
+                        log.warning(f"Groq {model} -> {r.status_code}: {r.text[:200]}")
+                        continue
+                    txt = r.json()["choices"][0]["message"]["content"] or ""
+                    if txt.strip():
+                        log.info(f"Risposta servita dal fallback Groq ({model})")
+                        return _FallbackResp(txt)
+                except Exception as e:
+                    log.warning(f"Groq {model} fallito: {e}")
+    except Exception as e:
+        log.warning(f"Groq non raggiungibile: {e}")
+    return None
+
+
+async def _generate(system: str, user_text: str, grounded: bool = False, json_mode: bool = False):
     # session_id resta nella firma pubblica per compatibilità: ogni chiamata usa già una
     # sessione nuova (new_session), quindi non c'è storico da mantenere.
     cfg = types.GenerateContentConfig(system_instruction=system)
@@ -128,9 +208,15 @@ async def _generate(system: str, user_text: str, grounded: bool = False):
             msg = str(e).lower()
             if not _is_transient(msg):
                 log.error(f"LLM error: {e}")
+                alt = await _groq_generate(system, user_text, json_mode)
+                if alt:
+                    return alt
                 raise HTTPException(status_code=502, detail="Errore dal servizio IA. Riprova.")
             if attempt == RETRY_ATTEMPTS - 1:
                 log.error(f"LLM error dopo {RETRY_ATTEMPTS} tentativi: {e}")
+                alt = await _groq_generate(system, user_text, json_mode)
+                if alt:
+                    return alt
                 raise HTTPException(status_code=429, detail="Il servizio IA è momentaneamente sovraccarico. Riprova tra qualche secondo.")
             log.warning(f"LLM transient ({attempt + 1}/{RETRY_ATTEMPTS}), riprovo: {e}")
             await asyncio.sleep(RETRY_BACKOFF[attempt])
@@ -160,14 +246,14 @@ def _parse_json(text: str) -> dict:
 
 
 async def llm_json(session_id: str, system: str, user_text: str) -> dict:
-    resp = await _generate(system, user_text)
+    resp = await _generate(system, user_text, json_mode=True)
     return _parse_json(resp.text or "")
 
 
 async def llm_json_grounded(session_id: str, system: str, user_text: str):
     """JSON + link reali delle fonti (Google Search grounding). -> (dict, [{title,url}])"""
     try:
-        resp = await _generate(system, user_text, grounded=True)
+        resp = await _generate(system, user_text, grounded=True, json_mode=True)
     except HTTPException as e:
         if e.status_code != 502:  # sovraccarico/quota: inutile riprovare senza tool
             raise

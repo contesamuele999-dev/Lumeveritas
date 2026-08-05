@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from db import db
 from models import (BriefingIn, BriefingItem, BriefingListOut, AskIn, AskOut,
                     ExplainIn, ExplainOut, ArticleQAIn, ArticleQA, DebateOut, DebateSide,
-                    VerifyOut, VerifyCriterion)
+                    VerifyOut, VerifyCriterion, TimelineOut, TimelineEvent)
 from llm import llm_json, llm_json_grounded, llm_text, sys_for, new_session
 from security import current_user
 from services.ratelimit import check_rate, client_key
@@ -314,6 +314,95 @@ Solo JSON."""
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
     await db.debates.update_one({"briefing_id": briefing_id, "language": out.language}, {"$set": out.model_dump()}, upsert=True)
+    return out
+
+
+# ---------- STORICO / TIMELINE ----------
+@router.post("/news/{briefing_id}/timeline", response_model=TimelineOut)
+async def timeline(briefing_id: str, refresh: bool = False):
+    """Sunto storico: la sequenza di eventi che ha portato alla situazione attuale."""
+    doc = await db.briefings.find_one({"id": briefing_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Notizia non trovata")
+    language = doc.get("language", "it")
+    if not refresh:
+        cached = await db.timelines.find_one({"briefing_id": briefing_id, "language": language}, {"_id": 0})
+        if cached:
+            return TimelineOut(**cached)
+
+    year = datetime.now(timezone.utc).year
+    if language == "en":
+        prompt = f"""Reconstruct the historical sequence of events that led to the situation described below. Explain HOW we got here, not just what is happening now.
+
+STORY:
+Title: {doc.get('headline','')}
+Summary: {doc.get('summary','')}
+Facts: {doc.get('key_facts',[])}
+{'Context: ' + doc['context'] if doc.get('context') else ''}
+
+Go back as far as needed for the reader to understand the roots (decades if relevant). Use verifiable dated events only: if a date is uncertain, say so in the date field (e.g. "early 1990s"). Do not invent events. The last events must reach as close as possible to {year}.
+
+Respond with valid JSON:
+{{
+  "summary": "5-8 sentences narrating how the current situation was reached, causes and chain of consequences",
+  "events": [
+    {{"date": "year or date", "title": "short event title", "description": "1-2 factual sentences", "significance": "why it mattered for what came after"}}
+  ],
+  "turning_points": ["the 2-4 moments that changed the trajectory"],
+  "open_questions": ["what is still undecided or disputed today"]
+}}
+Between 6 and 12 events, chronological order, oldest first. JSON only."""
+    else:
+        prompt = f"""Ricostruisci la sequenza storica di eventi che ha portato alla situazione descritta qui sotto. Spiega COME ci siamo arrivati, non solo cosa sta succedendo adesso.
+
+NOTIZIA:
+Titolo: {doc.get('headline','')}
+Riassunto: {doc.get('summary','')}
+Fatti: {doc.get('key_facts',[])}
+{'Contesto: ' + doc['context'] if doc.get('context') else ''}
+
+Risali indietro quanto serve perché il lettore capisca le radici (anche decenni, se rilevante). Usa solo eventi datati e verificabili: se una data è incerta scrivilo nel campo data (es. "primi anni '90"). Non inventare eventi. Gli ultimi eventi devono arrivare il più vicino possibile al {year}.
+
+Rispondi con JSON valido:
+{{
+  "summary": "5-8 frasi che raccontano come si è arrivati alla situazione attuale, cause e catena di conseguenze",
+  "events": [
+    {{"date": "anno o data", "title": "titolo breve dell'evento", "description": "1-2 frasi fattuali", "significance": "perché ha contato per quello che è venuto dopo"}}
+  ],
+  "turning_points": ["i 2-4 momenti che hanno cambiato la traiettoria"],
+  "open_questions": ["cosa resta ancora indeciso o conteso oggi"]
+}}
+Da 6 a 12 eventi, in ordine cronologico, dal più antico. Solo JSON."""
+
+    session = new_session(f"timeline-{briefing_id}")
+    data = await llm_json(session, sys_for(language), prompt)
+    events = []
+    for e in (data.get("events") or [])[:14]:
+        if not isinstance(e, dict):
+            continue
+        title = str(e.get("title", "")).strip()
+        if not title:
+            continue
+        events.append(TimelineEvent(
+            date=str(e.get("date", "")).strip()[:60],
+            title=title[:180],
+            description=str(e.get("description", "")).strip()[:600],
+            significance=(str(e.get("significance")).strip()[:400] or None) if e.get("significance") else None,
+        ))
+    out = TimelineOut(
+        briefing_id=briefing_id,
+        summary=str(data.get("summary", ""))[:2500],
+        events=events,
+        turning_points=[str(x)[:240] for x in (data.get("turning_points") or [])][:6],
+        open_questions=[str(x)[:240] for x in (data.get("open_questions") or [])][:6],
+        language=language,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    await db.timelines.update_one(
+        {"briefing_id": briefing_id, "language": language},
+        {"$set": out.model_dump()},
+        upsert=True,
+    )
     return out
 
 

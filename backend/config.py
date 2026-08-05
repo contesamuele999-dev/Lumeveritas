@@ -9,6 +9,11 @@ MONGO_URL = os.environ['MONGO_URL']
 DB_NAME = os.environ.get('DB_NAME', 'lume_veritas')
 GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash')
+# Fallback quando Gemini è sovraccarico (503/429). Opzionale: se la chiave manca,
+# il fallback resta disattivato e il comportamento è identico a prima.
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
+GROQ_MODEL = os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')
+GROQ_MODEL_FALLBACK = os.environ.get('GROQ_MODEL_FALLBACK', 'llama-3.1-8b-instant')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret')
 JWT_ALG = 'HS256'
 JWT_EXPIRE_DAYS = 30

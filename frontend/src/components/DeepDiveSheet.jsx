@@ -3,7 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Loader2, BookOpen, BarChart3, Landmark, ScrollText, MessageCircleQuestion, Users, Send, ArrowRight, ShieldCheck } from "lucide-react";
+import { Loader2, BookOpen, BarChart3, Landmark, ScrollText, MessageCircleQuestion, Users, Send, ArrowRight, ShieldCheck, History, Milestone, HelpCircle } from "lucide-react";
 import ClickableText from "@/components/ClickableText";
 import AudioButton from "@/components/AudioButton";
 import ShareButton from "@/components/ShareButton";
@@ -18,6 +18,9 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
   const [loadingDeep, setLoadingDeep] = useState(false);
   const [debate, setDebate] = useState(null);
   const [loadingDebate, setLoadingDebate] = useState(false);
+  const [history, setHistory] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
   const [qas, setQas] = useState([]);
   const [qaInput, setQaInput] = useState("");
   const [asking, setAsking] = useState(false);
@@ -66,6 +69,31 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
     return () => { cancel = true; };
   }, [open, item, tab, debate]);
 
+  // Load storico (timeline) on demand
+  const loadHistory = async ({ force = false } = {}) => {
+    if (!item) return;
+    setLoadingHistory(true);
+    setHistoryError(false);
+    try {
+      const { data: d } = await api.post(`/news/${item.id}/timeline${force ? "?refresh=true" : ""}`);
+      setHistory(d);
+    } catch (e) {
+      setHistoryError(true);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open || !item || tab !== "history") return;
+    if (history || loadingHistory || historyError) return;
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, item, tab, history, loadingHistory, historyError]);
+
+  // cambiando notizia lo storico precedente non ha più senso
+  useEffect(() => { setHistory(null); setHistoryError(false); setDebate(null); }, [item?.id]);
+
   // Load Q&A history
   useEffect(() => {
     let cancel = false;
@@ -96,6 +124,7 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
     { key: "deep", label: t(lang, "tab_deep"), icon: BookOpen },
     { key: "qa", label: t(lang, "tab_qa"), icon: MessageCircleQuestion },
     { key: "debate", label: t(lang, "tab_debate"), icon: Users },
+    { key: "history", label: t(lang, "tab_history"), icon: History },
     { key: "verify", label: t(lang, "tab_verify"), icon: ShieldCheck },
   ];
 
@@ -125,17 +154,18 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
         </div>
 
         {/* Tabs */}
-        <div className="sticky top-0 z-10 bg-background border-b border-border flex">
+        <div className="sticky top-0 z-10 bg-background border-b border-border flex overflow-x-auto no-scrollbar">
           {tabs.map((tb) => (
             <button
               key={tb.key}
               data-testid={`deep-tab-${tb.key}`}
               onClick={() => setTab(tb.key)}
-              className={`flex-1 px-2 md:px-4 h-12 md:h-14 font-mono-caps flex items-center justify-center gap-2 transition-colors border-r border-border last:border-r-0 ${
+              className={`flex-1 shrink-0 min-w-[5.5rem] px-2 md:px-4 h-12 md:h-14 font-mono-caps flex items-center justify-center gap-1.5 md:gap-2 transition-colors border-r border-border last:border-r-0 ${
                 tab === tb.key ? "bg-foreground text-background" : "hover:bg-secondary"
               }`}
             >
-              <tb.icon className="w-4 h-4" /> {tb.label}
+              <tb.icon className="w-4 h-4 shrink-0" />
+              <span className="truncate">{tb.label}</span>
             </button>
           ))}
         </div>
@@ -289,6 +319,111 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
               )}
             </div>
           )}
+          {tab === "history" && (
+            <div data-testid="deep-history">
+              {loadingHistory && (
+                <div className="flex items-center gap-3 text-muted-foreground py-6">
+                  <Loader2 className="w-5 h-5 animate-spin" /> {t(lang, "loading")}
+                </div>
+              )}
+
+              {!loadingHistory && historyError && (
+                <div className="py-6 space-y-4">
+                  <div className="text-muted-foreground">{t(lang, "history_empty")}</div>
+                  <button
+                    data-testid="history-retry"
+                    onClick={() => loadHistory({ force: true })}
+                    className="h-11 px-5 border border-foreground hover:bg-foreground hover:text-background transition-colors font-mono-caps"
+                  >
+                    {t(lang, "retry")}
+                  </button>
+                </div>
+              )}
+
+              {!loadingHistory && !historyError && history && (
+                <div className="space-y-8">
+                  <div className="font-mono-caps text-accent flex items-center gap-2">
+                    <History className="w-4 h-4" /> {t(lang, "history_title")}
+                  </div>
+
+                  {history.summary && (
+                    <section>
+                      <div className="font-mono-caps text-muted-foreground mb-2">{t(lang, "history_summary")}</div>
+                      <div className="text-base md:text-lg leading-relaxed text-foreground/90">
+                        <ClickableText text={history.summary} />
+                      </div>
+                      <div className="mt-4">
+                        <AudioButton text={history.summary} testid={`history-audio-${item?.id}`} />
+                      </div>
+                    </section>
+                  )}
+
+                  {history.events?.length > 0 && (
+                    <section>
+                      <div className="font-mono-caps text-accent mb-4 flex items-center gap-2">
+                        <ScrollText className="w-4 h-4" /> {t(lang, "history_events")}
+                      </div>
+                      {/* linea verticale = asse del tempo, dal più antico al presente */}
+                      <ol className="relative border-l border-border ml-2">
+                        {history.events.map((ev, i) => (
+                          <li key={i} className="relative pl-6 pb-7 last:pb-0" data-testid={`history-event-${i}`}>
+                            <span className="absolute -left-[5px] top-1.5 w-[9px] h-[9px] bg-accent rounded-full" />
+                            <div className="font-mono-caps text-accent text-[11px] mb-1">{ev.date}</div>
+                            <div className="font-serif-display text-xl md:text-2xl leading-snug mb-1">
+                              <ClickableText text={ev.title} contextText={ev.description} />
+                            </div>
+                            {ev.description && (
+                              <div className="text-sm md:text-base text-foreground/85 leading-relaxed">
+                                <ClickableText text={ev.description} />
+                              </div>
+                            )}
+                            {ev.significance && (
+                              <div className="mt-2 text-sm text-muted-foreground border-l-2 border-border pl-3">
+                                <ClickableText text={ev.significance} contextText={ev.description} />
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  )}
+
+                  {history.turning_points?.length > 0 && (
+                    <section className="border-t border-border pt-6">
+                      <div className="font-mono-caps text-accent mb-3 flex items-center gap-2">
+                        <Milestone className="w-4 h-4" /> {t(lang, "history_turning")}
+                      </div>
+                      <ul className="space-y-2">
+                        {history.turning_points.map((p, i) => (
+                          <li key={i} className="flex gap-3 text-base">
+                            <span className="font-mono-caps text-muted-foreground shrink-0 mt-1">{String(i + 1).padStart(2, "0")}</span>
+                            <span><ClickableText text={p} /></span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {history.open_questions?.length > 0 && (
+                    <section className="border-t border-border pt-6">
+                      <div className="font-mono-caps text-accent mb-3 flex items-center gap-2">
+                        <HelpCircle className="w-4 h-4" /> {t(lang, "history_open")}
+                      </div>
+                      <ul className="space-y-2">
+                        {history.open_questions.map((q, i) => (
+                          <li key={i} className="flex gap-2 text-sm md:text-base text-foreground/85">
+                            <span className="text-accent shrink-0">•</span>
+                            <span><ClickableText text={q} /></span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {tab === "verify" && (
             <div data-testid="deep-verify">
               <VerifyPanel briefingId={item.id} />
