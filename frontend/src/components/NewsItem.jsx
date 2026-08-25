@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import { Bookmark, BookmarkCheck, Sparkles, Users, ShieldCheck, History } from "lucide-react";
@@ -12,22 +12,14 @@ import AudioButton from "@/components/AudioButton";
 import ShareButton from "@/components/ShareButton";
 import { VerifyBadge } from "@/components/VerifyPanel";
 
-export default function NewsItem({ item, featured = false, onSaveToggle, initiallySaved = false }) {
+export default function NewsItem({ item, featured = false, onSaveToggle, initiallySaved = false, verify = null }) {
   const { lang } = useLang();
   const { user } = useAuth();
   const [openDeep, setOpenDeep] = useState(false);
   const [initialTab, setInitialTab] = useState("deep");
   const [saved, setSaved] = useState(initiallySaved);
   const [busy, setBusy] = useState(false);
-  const [verifyScore, setVerifyScore] = useState(null);
-
-  useEffect(() => {
-    let cancel = false;
-    api.get(`/news/${item.id}/verify`).then(({ data }) => {
-      if (!cancel) setVerifyScore(data.overall_score);
-    }).catch(() => {});
-    return () => { cancel = true; };
-  }, [item.id]);
+  // il punteggio arriva già pronto dalla lista (una sola chiamata per tutte le notizie)
 
   const toggleSave = async () => {
     if (!user) { toast.error(t(lang, "login_first")); return; }
@@ -59,6 +51,20 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
         <span>{item.topic}</span>
         <span className="w-1 h-1 bg-muted-foreground rounded-full" />
         <span className="tabular">{new Date(item.generated_at).toLocaleDateString(lang === "it" ? "it-IT" : "en-US")}</span>
+        {verify && (
+          <>
+            <span className="w-1 h-1 bg-muted-foreground rounded-full" />
+            <button
+              type="button"
+              data-testid={`verify-badge-btn-${item.id}`}
+              onClick={() => { setInitialTab("verify"); setOpenDeep(true); }}
+              title={verify.verdict}
+              className="inline-flex items-center"
+            >
+              <VerifyBadge score={verify.score} testid={`verify-badge-${item.id}`} />
+            </button>
+          </>
+        )}
       </div>
       <h3 className={`font-serif-display leading-[1.05] tracking-tight mb-2 md:mb-4 ${featured ? "text-2xl md:text-6xl" : "text-xl md:text-3xl"}`}>
         <ClickableText text={item.headline} contextText={item.summary} />

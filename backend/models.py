@@ -146,6 +146,10 @@ class VerifyOut(BaseModel):
     generated_at: str
 
 
+class VerifyScoresIn(BaseModel):
+    ids: List[str] = Field(default_factory=list, max_length=50)
+
+
 # -------------------- Saved --------------------
 class SaveItemIn(BaseModel):
     briefing_id: str

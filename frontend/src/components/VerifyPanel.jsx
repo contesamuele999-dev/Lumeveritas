@@ -64,7 +64,8 @@ export default function VerifyPanel({ briefingId }) {
     } finally { setLoading(false); setRefreshing(false); }
   };
 
-  useEffect(() => { load(false); /* eslint-disable-next-line */ }, [briefingId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(false); }, [briefingId]);
   useEffect(() => {
     api.get(`/verify/criteria?language=${lang}`).then(({ data: d }) => setCriteria(d.criteria)).catch(() => {});
   }, [lang]);

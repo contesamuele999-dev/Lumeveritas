@@ -1,15 +1,56 @@
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Suspense, useEffect, useState } from "react";
+import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useLang } from "@/context/LangContext";
 import { useAuth } from "@/context/AuthContext";
 import { t } from "@/lib/i18n";
-import { Sun, Moon, LogIn, LogOut, User, Bookmark, Home, MessageCircleQuestion, Globe } from "lucide-react";
+import { Sun, Moon, LogIn, LogOut, User, Bookmark, Home, MessageCircleQuestion, Globe, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import InstallPrompt from "@/components/InstallPrompt";
+import ErrorBoundary from "@/components/ErrorBoundary";
+
+function RouteFallback() {
+  return (
+    <div className="py-10 space-y-4 animate-pulse" data-testid="route-loading">
+      <div className="h-3 w-24 bg-muted" />
+      <div className="h-10 md:h-14 w-3/4 bg-muted" />
+      <div className="h-4 w-full bg-muted" />
+      <div className="h-4 w-2/3 bg-muted" />
+    </div>
+  );
+}
+
+/* Senza questo avviso, offline ogni azione falliva con un generico "errore di
+   caricamento" e sembrava un guasto del sito. */
+function OfflineBar({ lang }) {
+  const [offline, setOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
+  useEffect(() => {
+    const on = () => setOffline(false);
+    const off = () => setOffline(true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  if (!offline) return null;
+  return (
+    <div
+      data-testid="offline-bar"
+      role="status"
+      className="bg-accent text-accent-foreground font-mono-caps text-[11px] px-4 py-2 flex items-center justify-center gap-2"
+    >
+      <WifiOff className="w-3.5 h-3.5" />
+      {lang === "it" ? "Sei offline — le notizie non possono aggiornarsi" : "You are offline — news cannot refresh"}
+    </div>
+  );
+}
 
 export default function AppShell() {
   const { lang, setLang, theme, setTheme } = useLang();
   const { user, logout } = useAuth();
   const nav = useNavigate();
+  const { pathname } = useLocation();
 
   const links = [
     { to: "/", label: t(lang, "home"), icon: Home, testid: "nav-home" },
@@ -20,8 +61,16 @@ export default function AppShell() {
 
   return (
     <div className="App min-h-screen grain relative">
+      <a
+        href="#contenuto"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-2 focus:left-2 focus:bg-foreground focus:text-background focus:px-4 focus:py-2 font-mono-caps"
+      >
+        {lang === "it" ? "Vai al contenuto" : "Skip to content"}
+      </a>
+
       {/* HEADER */}
       <header data-app-header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border">
+        <OfflineBar lang={lang} />
         <div className="max-w-[1400px] mx-auto px-4 md:px-10 py-2.5 md:py-4 flex items-center gap-3 md:gap-6">
           <button
             data-testid="brand-home-btn"
@@ -100,8 +149,13 @@ export default function AppShell() {
       </header>
 
       {/* MAIN */}
-      <main data-app-main className="max-w-[1400px] mx-auto px-4 md:px-10 py-5 md:py-12 relative z-10 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
-        <Outlet />
+      <main id="contenuto" data-app-main className="max-w-[1400px] mx-auto px-4 md:px-10 py-5 md:py-12 relative z-10 pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+        {/* la chiave sul percorso azzera il boundary quando si cambia sezione */}
+        <ErrorBoundary key={pathname}>
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       {/* MOBILE BOTTOM NAV */}

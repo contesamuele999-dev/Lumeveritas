@@ -3,6 +3,7 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta name="color-scheme" content="light dark" />
         <meta name="theme-color" content="#f9f9f6" />
         <meta name="description" content="Lume Veritas — le notizie che i giornali trascurano." />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -13,8 +14,40 @@
         <meta name="apple-mobile-web-app-title" content="Lume Veritas" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet" />
+        <!-- Un solo foglio con i tre font realmente usati (prima Inter veniva scaricato
+             senza essere mai applicato, e gli altri tre erano nascosti in un @import
+             dentro il CSS: il browser li scopriva un giro di rete più tardi). -->
+        <link
+            rel="preload"
+            as="style"
+            href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        />
+        <link
+            rel="stylesheet"
+            href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        />
         <title>Lume Veritas — le notizie che i giornali trascurano</title>
+        <script>
+            /* Il tema veniva applicato da React dopo il primo disegno: chi usa il tema
+               scuro vedeva un lampo bianco a ogni caricamento. Qui la classe è già
+               a posto prima che il browser dipinga qualcosa. */
+            (function () {
+                try {
+                    var saved = localStorage.getItem("lv_theme");
+                    var dark =
+                        saved === "dark" ||
+                        (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches);
+                    if (dark) {
+                        document.documentElement.classList.add("dark");
+                        var m = document.querySelector('meta[name="theme-color"]');
+                        if (m) m.setAttribute("content", "#12141a");
+                    }
+                    var lang = localStorage.getItem("lv_lang");
+                    if (!lang) lang = (navigator.language || "it").toLowerCase().indexOf("it") === 0 ? "it" : "en";
+                    document.documentElement.lang = lang;
+                } catch (e) {}
+            })();
+        </script>
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>

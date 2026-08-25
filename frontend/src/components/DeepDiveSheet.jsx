@@ -31,25 +31,26 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
   useBackClose(open, () => onOpenChange(false));
 
   // Load deep dive
+  // Attenzione: `setData(item)` non va eseguito a ogni cambio di scheda. Prima lo era, e
+  // passare da "Approfondisci" a "Domande" e tornare indietro buttava via il testo già
+  // ricevuto, rimettendo lo spinner e rifacendo la chiamata.
   useEffect(() => {
     let cancel = false;
     const load = async () => {
-      if (!open || !item) return;
-      setData(item);
-      if (tab === "deep") {
-        if (item.real_reasons) return;
-        setLoadingDeep(true);
-        try {
-          const { data: d } = await api.post(`/news/deep-dive/${item.id}`);
-          if (!cancel) setData(d);
-        } catch (e) {} finally {
-          if (!cancel) setLoadingDeep(false);
-        }
+      if (!open || !item || tab !== "deep") return;
+      if (data?.real_reasons) return;
+      setLoadingDeep(true);
+      try {
+        const { data: d } = await api.post(`/news/deep-dive/${item.id}`);
+        if (!cancel) setData(d);
+      } catch (e) {} finally {
+        if (!cancel) setLoadingDeep(false);
       }
     };
     load();
     return () => { cancel = true; };
-  }, [open, item, tab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, item?.id, tab, data?.real_reasons]);
 
   // Load debate on demand
   useEffect(() => {
@@ -91,8 +92,15 @@ export default function DeepDiveSheet({ item, open, onOpenChange, initialTab = "
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item, tab, history, loadingHistory, historyError]);
 
-  // cambiando notizia lo storico precedente non ha più senso
-  useEffect(() => { setHistory(null); setHistoryError(false); setDebate(null); }, [item?.id]);
+  // cambiando notizia storico, dibattito e approfondimento precedenti non hanno più senso
+  useEffect(() => {
+    setData(item);
+    setHistory(null);
+    setHistoryError(false);
+    setDebate(null);
+    setQas([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id]);
 
   // Load Q&A history
   useEffect(() => {

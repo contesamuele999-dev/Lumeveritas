@@ -1,6 +1,7 @@
 """Startup migrations. Idempotent."""
 from log import log
 from db import db
+from services.indexes import ensure_indexes
 
 
 async def migrate_custom_topic_keys():
@@ -36,6 +37,10 @@ async def migrate_custom_topic_keys():
 
 
 async def run_startup_migrations():
+    try:
+        await ensure_indexes()
+    except Exception as e:
+        log.error(f"index error: {e}")
     try:
         await migrate_custom_topic_keys()
     except Exception as e:

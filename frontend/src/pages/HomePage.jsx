@@ -9,6 +9,7 @@ import { t } from "@/lib/i18n";
 import { Loader2, RefreshCcw, MousePointerClick, Radio } from "lucide-react";
 import { toast } from "sonner";
 import RssFeed from "@/components/RssFeed";
+import useVerifyScores from "@/hooks/useVerifyScores";
 
 export default function HomePage() {
   const { lang } = useLang();
@@ -20,7 +21,10 @@ export default function HomePage() {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    api.get("/topics").then(({ data }) => setTopics(data));
+    api.get("/topics")
+      .then(({ data }) => setTopics(data))
+      .catch(() => toast.error(lang === "it" ? "Argomenti non disponibili" : "Topics unavailable"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const allTopics = useMemo(() => {
@@ -42,10 +46,20 @@ export default function HomePage() {
   }, [topics, visibleTopics, selected]);
 
   const reqId = useRef(0);
+  /* Tornare su un argomento già letto rimetteva lo scheletro di caricamento e rifaceva
+     la chiamata, anche se il backend avrebbe risposto con la stessa cache. Qui la
+     risposta resta in memoria per la sessione: il ritorno è immediato. */
+  const cache = useRef(new Map());
 
   const loadBriefing = async (topic, refresh = false) => {
     if (!topic) return;
     const myReq = ++reqId.current;
+    const cacheKey = `${topic.key}:${lang}`;
+    if (!refresh && cache.current.has(cacheKey)) {
+      setItems(cache.current.get(cacheKey));
+      setLoading(false);
+      return;
+    }
     if (refresh) setRefreshing(true);
     else { setLoading(true); setItems([]); }  // niente notizie del topic precedente durante l'attesa
     try {
@@ -56,6 +70,7 @@ export default function HomePage() {
         if (topic.source) body.source = topic.source;
       }
       const { data } = await api.post("/news/briefing", body);
+      cache.current.set(cacheKey, data.items);
       if (myReq !== reqId.current) return;  // click rapido su un altro argomento: risposta obsoleta
       setItems(data.items);
     } catch (e) {
@@ -73,6 +88,7 @@ export default function HomePage() {
 
   const featured = items[0];
   const rest = items.slice(1);
+  const verifyScores = useVerifyScores(items);
 
   return (
     <div className="space-y-6 md:space-y-10">
@@ -143,13 +159,13 @@ export default function HomePage() {
           <>
             {featured && (
               <div className="border-b border-border pb-6">
-                <NewsItem item={featured} featured />
+                <NewsItem item={featured} featured verify={verifyScores[featured.id]} />
               </div>
             )}
             <div className="grid md:grid-cols-2 gap-x-10 mt-2 col-rule md:col-rule-0" >
               {rest.map((it) => (
                 <div key={it.id} className="border-b border-border md:border-b md:pr-2 first:pt-2">
-                  <NewsItem item={it} />
+                  <NewsItem item={it} verify={verifyScores[it.id]} />
                 </div>
               ))}
             </div>

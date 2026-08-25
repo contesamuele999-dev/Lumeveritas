@@ -1,6 +1,6 @@
 import uuid
 from typing import List
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Response
 from db import db
 from models import DEFAULT_TOPICS, CustomTopicIn, CustomTopic, slugify
 from security import require_user
@@ -10,7 +10,10 @@ router = APIRouter(prefix="/api", tags=["topics"])
 
 
 @router.get("/topics")
-async def get_topics():
+async def get_topics(response: Response):
+    # elenco fisso compilato nel codice: senza questo header il browser lo richiedeva
+    # da capo a ogni apertura della home
+    response.headers["Cache-Control"] = "public, max-age=3600"
     return DEFAULT_TOPICS
 
 

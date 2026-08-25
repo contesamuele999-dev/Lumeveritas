@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
@@ -7,37 +7,63 @@ import { ExternalLink, Loader2 } from "lucide-react";
 export default function RssFeed({ topic }) {
   const { lang } = useLang();
   const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const boxRef = useRef(null);
+
+  /* Questa sezione sta in fondo alla home ma partiva subito insieme al briefing, e
+     il backend deve interrogare gli RSS e tradurli con l'IA: decine di secondi di
+     lavoro per qualcosa che molti utenti non scorrono nemmeno. Ora parte quando si
+     avvicina allo schermo. */
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || visible) return;
+    if (typeof IntersectionObserver === "undefined") { setVisible(true); return; }
+    const io = new IntersectionObserver(
+      (entries) => entries.some((e) => e.isIntersecting) && setVisible(true),
+      { rootMargin: "400px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
 
   useEffect(() => {
-    if (!topic) return;
+    if (!topic || !visible) return;
+    let cancel = false;
     setLoading(true); setItems([]);
     const label = lang === "it" ? topic.label_it : topic.label_en;
     // lang serve al backend sia per scegliere le fonti sia per tradurre quelle straniere
     api.get(`/rss/feed?topic=${encodeURIComponent(label)}&limit=8&lang=${lang}`)
-      .then(({ data }) => setItems(data.items || []))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
-  }, [topic, lang]);
+      .then(({ data }) => { if (!cancel) setItems(data.items || []); })
+      .catch(() => { if (!cancel) setItems([]); })
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [topic, lang, visible]);
 
-  if (loading) {
+  if (!visible || loading) {
     return (
-      <div className="py-8 text-muted-foreground flex items-center gap-2 font-mono-caps">
-        <Loader2 className="w-4 h-4 animate-spin" /> {t(lang, "loading")}
+      <div ref={boxRef} className="py-8 text-muted-foreground flex items-center gap-2 font-mono-caps" data-testid="rss-placeholder">
+        {loading ? (
+          <><Loader2 className="w-4 h-4 animate-spin" /> {t(lang, "loading")}</>
+        ) : (
+          <span className="text-[11px]">
+            {lang === "it" ? "Scorri per caricare le fonti in tempo reale" : "Scroll to load the live sources"}
+          </span>
+        )}
       </div>
     );
   }
 
   if (!items.length) {
     return (
-      <div className="py-6 text-muted-foreground font-mono-caps text-sm">
+      <div ref={boxRef} className="py-6 text-muted-foreground font-mono-caps text-sm">
         {lang === "it" ? "— nessuna fonte RSS per questo argomento —" : "— no live sources for this topic —"}
       </div>
     );
   }
 
   return (
-    <div className="col-rule" data-testid="rss-feed">
+    <div ref={boxRef} className="col-rule" data-testid="rss-feed">
       {items.map((it, i) => (
         <a
           key={i}

@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import CORS_ORIGINS
@@ -35,6 +36,10 @@ app.include_router(saved.router)
 app.include_router(rss.router)
 app.include_router(public.router)
 app.include_router(digest_router.router)
+
+# I briefing sono JSON di testo: compressi viaggiano a circa un quarto della dimensione.
+# Va registrato prima del CORS, così l'header di compressione non salta le preflight.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,

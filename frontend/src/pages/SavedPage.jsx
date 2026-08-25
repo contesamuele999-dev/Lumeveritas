@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
 import NewsItem from "@/components/NewsItem";
+import useVerifyScores from "@/hooks/useVerifyScores";
 import { Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -12,6 +13,7 @@ export default function SavedPage() {
   const { lang } = useLang();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const verifyScores = useVerifyScores(items);
 
   const load = () => {
     if (!user) { setLoading(false); return; }
@@ -46,7 +48,7 @@ export default function SavedPage() {
       ) : (
         <div className="col-rule">
           {items.map((it) => (
-            <NewsItem key={it.id} item={it} initiallySaved onSaveToggle={load} />
+            <NewsItem key={it.id} item={it} initiallySaved onSaveToggle={load} verify={verifyScores[it.id]} />
           ))}
         </div>
       )}

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from db import db
 from models import (BriefingIn, BriefingItem, BriefingListOut, AskIn, AskOut,
                     ExplainIn, ExplainOut, ArticleQAIn, ArticleQA, DebateOut, DebateSide,
-                    VerifyOut, VerifyCriterion, TimelineOut, TimelineEvent)
+                    VerifyOut, VerifyCriterion, VerifyScoresIn, TimelineOut, TimelineEvent)
 from llm import llm_json, llm_json_grounded, llm_text, sys_for, new_session
 from security import current_user
 from services.ratelimit import check_rate, client_key
@@ -524,6 +524,29 @@ async def get_verify_cached(briefing_id: str):
     if not cached:
         raise HTTPException(status_code=404, detail="Verifica non ancora eseguita")
     return VerifyOut(**cached)
+
+
+@router.post("/news/verify/scores")
+async def verify_scores(inp: VerifyScoresIn):
+    """Punteggi già calcolati per un elenco di notizie, in una sola query.
+
+    La lista notizie chiedeva il punteggio con una GET per articolo: sei richieste
+    per pagina, quasi tutte con esito 404 perché la verifica non era ancora stata
+    lanciata. Qui si risponde con una sola andata e ritorno e senza errori.
+    """
+    ids = [i for i in dict.fromkeys(inp.ids) if isinstance(i, str)][:50]
+    if not ids:
+        return {"scores": {}}
+    docs = await db.verifications.find(
+        {"briefing_id": {"$in": ids}},
+        {"_id": 0, "briefing_id": 1, "overall_score": 1, "verdict": 1, "language": 1},
+    ).to_list(len(ids) * 2)
+    scores = {}
+    for d in docs:
+        # se esistono più lingue per la stessa notizia va bene la prima: il punteggio
+        # valuta i fatti, non la traduzione
+        scores.setdefault(d["briefing_id"], {"score": d.get("overall_score", 0), "verdict": d.get("verdict", "")})
+    return {"scores": scores}
 
 
 @router.get("/verify/criteria")
