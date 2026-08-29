@@ -21,6 +21,10 @@ INDEXES = [
     # la cache dei briefing filtra per argomento+lingua e ordina per data
     ("briefings", [("topic", ASCENDING), ("language", ASCENDING), ("generated_at", DESCENDING)],
      {"name": "briefing_cache"}),
+    # elenco dei titoli usciti di recente su tutti gli argomenti: serve a non ripetere
+    # la stessa notizia in argomenti vicini
+    ("briefings", [("language", ASCENDING), ("generated_at", DESCENDING)],
+     {"name": "briefing_recent"}),
 
     ("saved", [("user_id", ASCENDING), ("briefing_id", ASCENDING)], {"unique": True, "name": "saved_user_item"}),
     ("saved", [("user_id", ASCENDING), ("saved_at", DESCENDING)], {"name": "saved_recent"}),

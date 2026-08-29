@@ -267,6 +267,108 @@ RSS_FEEDS_IT = {
     "curiosita": ["https://www.focus.it/rss/tutti.rss", "https://www.ilpost.it/feed/"],
 }
 
+# Confine tematico di ogni argomento. Senza questo, "Geopolitica", "Guerre e veri motivi"
+# e "Scelte politiche" producevano le stesse tre notizie riscritte: al modello arrivava
+# solo l'etichetta, e per tutte e tre la risposta più ovvia era la crisi internazionale
+# del giorno. Ogni voce dice cosa rientra e cosa va lasciato agli argomenti vicini.
+TOPIC_SCOPES = {
+    "geopolitica": (
+        "relazioni fra stati, alleanze, sanzioni, basi militari, rotte commerciali e controllo delle risorse. "
+        "Lascia ad altri argomenti la cronaca dei combattimenti e la politica interna di un singolo paese.",
+        "relations between states, alliances, sanctions, military bases, trade routes and control of resources. "
+        "Leave battlefield reporting and a single country's domestic politics to other topics.",
+    ),
+    "guerre": (
+        "conflitti armati in corso o latenti: andamento sul terreno, forniture di armi, contractor, costi umani "
+        "ed economici, interessi materiali dietro la guerra. Non analisi diplomatiche generiche.",
+        "ongoing or latent armed conflicts: developments on the ground, arms supplies, contractors, human and "
+        "economic costs, material interests behind the war. Not generic diplomatic analysis.",
+    ),
+    "politica": (
+        "decisioni di governi e parlamenti sulla politica interna: nomine, riforme, bilanci, scandali, rapporti "
+        "con lobby e gruppi di interesse. Non conflitti armati né relazioni internazionali.",
+        "decisions by governments and parliaments on domestic politics: appointments, reforms, budgets, scandals, "
+        "ties with lobbies and interest groups. Not armed conflicts or international relations.",
+    ),
+    "leggi": (
+        "singole leggi, decreti, regolamenti e sentenze approvati di recente e i loro effetti concreti su cittadini "
+        "e imprese. Cita il nome o il numero dell'atto.",
+        "individual laws, decrees, regulations and rulings recently passed and their concrete effects on citizens "
+        "and businesses. Name the act or its number.",
+    ),
+    "mercati": (
+        "borse, materie prime, valute, tassi, debito, mosse delle banche centrali e movimenti dei grandi investitori.",
+        "stock markets, commodities, currencies, rates, debt, central bank moves and large investors' positions.",
+    ),
+    "economia": (
+        "economia reale: lavoro, salari, prezzi, produzione, commercio, filiere, disuguaglianza. "
+        "Non le quotazioni giornaliere dei mercati.",
+        "the real economy: jobs, wages, prices, production, trade, supply chains, inequality. "
+        "Not daily market quotes.",
+    ),
+    "cripto": (
+        "criptovalute, finanza decentralizzata, pagamenti alternativi, valute digitali di banca centrale e "
+        "regolamentazione del settore.",
+        "cryptocurrencies, decentralised finance, alternative payments, central bank digital currencies and "
+        "regulation of the sector.",
+    ),
+    "ia": (
+        "intelligenza artificiale: modelli, ricerca, usi concreti, incidenti, regole, impatto su lavoro e informazione.",
+        "artificial intelligence: models, research, concrete uses, incidents, rules, impact on work and information.",
+    ),
+    "tecnologia": (
+        "tecnologia e industria digitale fuori dall'IA: hardware, reti, software, sicurezza informatica, "
+        "piattaforme, telecomunicazioni.",
+        "technology and the digital industry beyond AI: hardware, networks, software, cybersecurity, platforms, "
+        "telecoms.",
+    ),
+    "scienza": (
+        "risultati di ricerca pubblicati (studi, esperimenti, missioni), citando rivista o istituzione che li ha prodotti.",
+        "published research results (studies, experiments, missions), citing the journal or institution behind them.",
+    ),
+    "invenzioni": (
+        "nuove invenzioni, brevetti, prototipi e applicazioni pratiche appena realizzate. "
+        "Non studi teorici né annunci di prodotto delle grandi aziende.",
+        "new inventions, patents, prototypes and freshly built practical applications. "
+        "Not theoretical studies or big-company product announcements.",
+    ),
+    "scuola": (
+        "scuola, università e formazione: programmi, riforme, dati sull'apprendimento, insegnanti, costi e accesso allo studio.",
+        "schools, universities and training: curricula, reforms, learning data, teachers, costs and access to study.",
+    ),
+    "curiosita": (
+        "fatti curiosi, insoliti o poco noti, ma verificati e documentati. Non cronaca politica o economica.",
+        "curious, unusual or little-known facts, but verified and documented. Not political or economic reporting.",
+    ),
+    "salute": (
+        "salute e medicina: terapie, epidemiologia, sistemi sanitari, farmaci, dati su malattie e prevenzione.",
+        "health and medicine: treatments, epidemiology, health systems, drugs, disease and prevention data.",
+    ),
+    "ambiente": (
+        "ambiente e risorse naturali: inquinamento, energia, acqua, suolo, biodiversità, clima, con dati misurati.",
+        "environment and natural resources: pollution, energy, water, soil, biodiversity, climate, with measured data.",
+    ),
+    "societa": (
+        "cultura, costumi, religione, media, migrazioni, criminalità e mutamenti sociali documentati.",
+        "culture, customs, religion, media, migration, crime and documented social change.",
+    ),
+    "popolazione": (
+        "demografia: natalità, mortalità, invecchiamento, migrazioni, composizione della popolazione, "
+        "con serie storiche e proiezioni.",
+        "demography: births, deaths, ageing, migration, population composition, with historical series and projections.",
+    ),
+    "sondaggi": (
+        "sondaggi e rilevazioni d'opinione appena pubblicati: chi li ha condotti, campione, domande, percentuali.",
+        "opinion polls and surveys just published: who ran them, sample, questions, percentages.",
+    ),
+    "statistiche": (
+        "dati e indicatori appena diffusi da istituti ufficiali o centri di ricerca: cosa misurano e come sono cambiati.",
+        "figures and indicators just released by official institutes or research centres: what they measure and how "
+        "they changed.",
+    ),
+}
+
+
 TOPIC_KEY_BY_LABEL = {t["label_it"].lower(): t["key"] for t in DEFAULT_TOPICS}
 TOPIC_KEY_BY_LABEL.update({t["label_en"].lower(): t["key"] for t in DEFAULT_TOPICS})
 

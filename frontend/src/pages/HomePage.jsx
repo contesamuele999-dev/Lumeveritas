@@ -19,6 +19,7 @@ export default function HomePage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     api.get("/topics")
@@ -60,6 +61,7 @@ export default function HomePage() {
       setLoading(false);
       return;
     }
+    setError(null);
     if (refresh) setRefreshing(true);
     else { setLoading(true); setItems([]); }  // niente notizie del topic precedente durante l'attesa
     try {
@@ -70,13 +72,19 @@ export default function HomePage() {
         if (topic.source) body.source = topic.source;
       }
       const { data } = await api.post("/news/briefing", body);
-      cache.current.set(cacheKey, data.items);
+      const fresh = data.items || [];
+      // Una risposta vuota non va messa in cache: restava fino a ricarica della pagina e
+      // l'argomento sembrava definitivamente senza notizie.
+      if (fresh.length) cache.current.set(cacheKey, fresh);
       if (myReq !== reqId.current) return;  // click rapido su un altro argomento: risposta obsoleta
-      setItems(data.items);
+      setItems(fresh);
+      if (!fresh.length) setError(lang === "it" ? "Nessuna notizia per ora su questo argomento." : "No stories yet on this topic.");
     } catch (e) {
       if (myReq !== reqId.current) return;
-      toast.error(e?.response?.data?.detail || e?.message || (lang === "it" ? "Errore nel caricamento" : "Loading error"));
-      setItems([]);
+      const msg = e?.response?.data?.detail || e?.message || (lang === "it" ? "Errore nel caricamento" : "Loading error");
+      toast.error(msg);
+      // Un refresh fallito non deve cancellare le notizie già a schermo.
+      if (!refresh) setError(msg);
     } finally {
       if (myReq === reqId.current) { setLoading(false); setRefreshing(false); }
     }
@@ -154,7 +162,18 @@ export default function HomePage() {
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="py-24 text-center text-muted-foreground font-mono-caps">— no items —</div>
+          <div className="py-20 text-center space-y-4" data-testid="briefing-empty">
+            <div className="text-muted-foreground font-mono-caps text-[11px]">
+              {error || (lang === "it" ? "Nessuna notizia per ora su questo argomento." : "No stories yet on this topic.")}
+            </div>
+            <button
+              data-testid="briefing-retry-btn"
+              onClick={() => loadBriefing(selected, true)}
+              className="font-mono-caps inline-flex items-center gap-2 border border-border px-4 py-2 hover:text-accent hover:border-accent transition-colors"
+            >
+              <RefreshCcw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} /> {t(lang, "refresh")}
+            </button>
+          </div>
         ) : (
           <>
             {featured && (

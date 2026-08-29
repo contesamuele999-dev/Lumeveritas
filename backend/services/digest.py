@@ -9,6 +9,7 @@ from config import MAILEROO_API_KEY, SENDER_EMAIL, SENDER_NAME, PUBLIC_APP_URL
 from db import db
 from log import log
 from models import BriefingIn, DEFAULT_TOPICS
+from services.dedup import drop_duplicates
 from services.digest_rules import DIGEST_HOUR, is_due, rome_tz
 
 TZ = rome_tz()
@@ -89,6 +90,7 @@ async def build_digest_for_user(user_doc: dict, run_briefing_fn) -> Optional[dic
     all_topics = list(DEFAULT_TOPICS) + list(user_doc.get("custom_topics") or [])
     by_key = {t["key"]: t for t in all_topics}
     sections = []
+    used_headlines: list = []
     for k in topic_keys:
         topic_meta = by_key.get(k)
         if not topic_meta:
@@ -100,8 +102,14 @@ async def build_digest_for_user(user_doc: dict, run_briefing_fn) -> Optional[dic
                 kind=topic_meta.get("kind") or "topic",
                 source=topic_meta.get("source"),
             ))
-            if res.items:
-                sections.append({"topic": label, "items": [i.model_dump() for i in res.items[:3]]})
+            # Argomenti vicini (es. Geopolitica e Guerre) riportavano la stessa notizia in
+            # due sezioni: l'email sembrava ripetersi. Un titolo già usato viene saltato e
+            # la sezione prende quello successivo.
+            keep = drop_duplicates([i.headline for i in res.items], known=used_headlines)
+            items = [res.items[idx] for idx in keep][:3]
+            if items:
+                used_headlines.extend(i.headline for i in items)
+                sections.append({"topic": label, "items": [i.model_dump() for i in items]})
         except Exception as e:
             log.warning(f"digest section failed {k}: {e}")
     if not sections:

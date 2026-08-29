@@ -6,15 +6,66 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from db import db
 from models import (BriefingIn, BriefingItem, BriefingListOut, AskIn, AskOut,
                     ExplainIn, ExplainOut, ArticleQAIn, ArticleQA, DebateOut, DebateSide,
-                    VerifyOut, VerifyCriterion, VerifyScoresIn, TimelineOut, TimelineEvent)
+                    VerifyOut, VerifyCriterion, VerifyScoresIn, TimelineOut, TimelineEvent,
+                    TOPIC_KEY_BY_LABEL, TOPIC_SCOPES)
 from llm import llm_json, llm_json_grounded, llm_text, sys_for, new_session
+from log import log
 from security import current_user
+from services.dedup import drop_duplicates
 from services.ratelimit import check_rate, client_key
 
 router = APIRouter(prefix="/api", tags=["news"])
 
 
 # ---------- BRIEFINGS ----------
+FRESH_HOURS = 6          # entro questo tempo la home riusa quanto già generato
+RECENT_WINDOW_HOURS = 48  # finestra entro cui una notizia è considerata "già uscita"
+MIN_CACHED_ITEMS = 2      # sotto questa soglia vale la pena rigenerare
+FAIL_COOLDOWN_SECONDS = 600
+
+# Quando il servizio IA è giù o a quota esaurita, ogni apertura della home ritentava la
+# generazione e restava in attesa per decine di secondi prima di fallire. Dopo un errore
+# l'argomento resta in pausa per qualche minuto e si servono subito le ultime notizie note.
+_fail_until: dict = {}
+
+
+def _in_cooldown(topic: str, language: str) -> bool:
+    until = _fail_until.get((topic, language))
+    return bool(until and until > datetime.now(timezone.utc))
+
+
+def _pause_topic(topic: str, language: str) -> None:
+    _fail_until[(topic, language)] = datetime.now(timezone.utc) + timedelta(seconds=FAIL_COOLDOWN_SECONDS)
+
+
+async def _cached_items(topic: str, language: str, since: Optional[str] = None, limit: int = 6) -> List[dict]:
+    query = {"topic": topic, "language": language}
+    if since:
+        query["generated_at"] = {"$gte": since}
+    return await db.briefings.find(query, {"_id": 0}).sort("generated_at", -1).to_list(limit)
+
+
+async def _recent_headlines(language: str, limit: int = 80) -> List[dict]:
+    """Titoli usciti nelle ultime ore, con il loro argomento."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=RECENT_WINDOW_HOURS)).isoformat()
+    docs = await db.briefings.find(
+        {"language": language, "generated_at": {"$gte": cutoff}},
+        {"_id": 0, "headline": 1, "topic": 1},
+    ).sort("generated_at", -1).to_list(limit)
+    return [d for d in docs if d.get("headline")]
+
+
+def _scope_for(topic: str, kind: str, language: str) -> str:
+    """Confine tematico dell'argomento: evita che argomenti vicini raccontino lo stesso fatto."""
+    if kind and kind != "topic":
+        return ""
+    key = TOPIC_KEY_BY_LABEL.get((topic or "").strip().lower())
+    scope = TOPIC_SCOPES.get(key)
+    if not scope:
+        return ""
+    return scope[0] if language == "it" else scope[1]
+
+
 def _focus_prompt(topic: str, kind: str, source: Optional[str], language: str) -> str:
     if language == "en":
         if kind == "person":
@@ -45,10 +96,25 @@ def _focus_prompt(topic: str, kind: str, source: Optional[str], language: str) -
 async def generate_briefing(topic: str, language: str, kind: str = "topic", source: Optional[str] = None) -> List[BriefingItem]:
     lang_label = "italiano" if language == "it" else "English"
     focus = _focus_prompt(topic, kind, source, language)
+    scope = _scope_for(topic, kind, language)
+
+    # Il modello, lasciato solo con l'etichetta dell'argomento, ripropone la notizia più
+    # grossa del giorno per ogni argomento vicino. Gli si passa quindi cosa è già uscito.
+    recent = await _recent_headlines(language)
+    avoid = [d["headline"] for d in recent][:40]
+    others = [d["headline"] for d in recent if d.get("topic") != topic]
+    listed = "\n".join(f"- {h}" for h in avoid)
+
     if language == "en":
+        scope_block = f"SCOPE OF THIS TOPIC (stay inside it): {scope}\n" if scope else ""
+        avoid_block = (
+            "ALREADY PUBLISHED IN THE APP — do not repeat these stories, not even "
+            f"reworded. Pick different facts:\n{listed}\n" if avoid else ""
+        )
         prompt = f"""Generate 5 news briefings: {focus}
-Priority: recent news (last 12 months) overlooked by mainstream media, concrete data, inventions, laws, discoveries, polls, real trends.
-Answer ONLY in {lang_label}.
+{scope_block}Priority: recent news (last 12 months) overlooked by mainstream media, concrete data, inventions, laws, discoveries, polls, real trends.
+The 5 briefings must cover 5 distinct events, not five angles on the same one.
+{avoid_block}Answer ONLY in {lang_label}.
 
 Respond STRICTLY with valid JSON:
 {{
@@ -63,9 +129,15 @@ Respond STRICTLY with valid JSON:
 }}
 No text outside the JSON. Do not invent specific data if uncertain."""
     else:
+        scope_block = f"AMBITO DI QUESTO ARGOMENTO (resta dentro questo confine): {scope}\n" if scope else ""
+        avoid_block = (
+            "NOTIZIE GIÀ PUBBLICATE NELL'APP — non riproporle, nemmeno riformulate. "
+            f"Scegli fatti diversi:\n{listed}\n" if avoid else ""
+        )
         prompt = f"""Genera 5 briefing di notizie: {focus}
-Priorità: notizie recenti (ultimi 12 mesi) trascurate dai media mainstream, dati concreti, invenzioni, leggi, scoperte, sondaggi, tendenze reali.
-Rispondi SOLO in {lang_label}.
+{scope_block}Priorità: notizie recenti (ultimi 12 mesi) trascurate dai media mainstream, dati concreti, invenzioni, leggi, scoperte, sondaggi, tendenze reali.
+I 5 briefing devono riguardare 5 fatti distinti, non cinque angolazioni dello stesso fatto.
+{avoid_block}Rispondi SOLO in {lang_label}.
 
 Rispondi ESCLUSIVAMENTE con JSON valido:
 {{
@@ -81,9 +153,20 @@ Rispondi ESCLUSIVAMENTE con JSON valido:
 Nessun testo fuori dal JSON. Non inventare dati specifici se non ne sei sicuro."""
     session_id = new_session("briefing")
     data, sources = await llm_json_grounded(session_id, sys_for(language), prompt)
+
+    raw = [it for it in (data.get("items") or [])
+           if isinstance(it, dict) and str(it.get("headline", "")).strip()][:6]
+    # Il divieto nel prompt non basta sempre: si scartano comunque i titoli che raccontano
+    # una notizia già uscita in un ALTRO argomento (o ripetuta dentro la stessa risposta).
+    # Le repliche nello stesso argomento restano: uno sviluppo del giorno dopo è legittimo.
+    keep = drop_duplicates([it["headline"] for it in raw], known=others)
+    if len(keep) < len(raw):
+        log.info(f"briefing '{topic}': {len(raw) - len(keep)} notizie scartate perché già uscite altrove")
+    raw = [raw[i] for i in keep]
+
     now = datetime.now(timezone.utc).isoformat()
     items = []
-    for it in data.get("items", [])[:6]:
+    for it in raw:
         items.append(BriefingItem(
             id=str(uuid.uuid4()),
             topic=topic,
@@ -101,17 +184,50 @@ Nessun testo fuori dal JSON. Non inventare dati specifici se non ne sei sicuro."
 
 
 async def run_briefing(inp: BriefingIn) -> BriefingListOut:
+    def listing(docs: List[dict]) -> BriefingListOut:
+        return BriefingListOut(topic=inp.topic, language=inp.language,
+                               items=[BriefingItem(**d) for d in docs[:6]])
+
     if not inp.refresh:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
-        cached = await db.briefings.find({
-            "topic": inp.topic, "language": inp.language, "generated_at": {"$gte": cutoff}
-        }, {"_id": 0}).sort("generated_at", -1).to_list(6)
-        if len(cached) >= 3:
-            return BriefingListOut(topic=inp.topic, language=inp.language, items=[BriefingItem(**c) for c in cached[:6]])
-    items = await generate_briefing(inp.topic, inp.language, kind=inp.kind or "topic", source=inp.source)
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=FRESH_HOURS)).isoformat()
+        cached = await _cached_items(inp.topic, inp.language, since=cutoff)
+        if len(cached) >= MIN_CACHED_ITEMS:
+            return listing(cached)
+        # generazione appena fallita: inutile far attendere l'utente per un altro errore
+        if _in_cooldown(inp.topic, inp.language):
+            stale = await _cached_items(inp.topic, inp.language)
+            if stale:
+                return listing(stale)
+
+    try:
+        items = await generate_briefing(inp.topic, inp.language, kind=inp.kind or "topic", source=inp.source)
+    except HTTPException as e:
+        log.warning(f"briefing '{inp.topic}': generazione non riuscita ({e.detail})")
+        items = []
+    except Exception as e:
+        log.error(f"briefing '{inp.topic}': errore inatteso in generazione: {e}")
+        items = []
+
     if items:
         await db.briefings.insert_many([i.model_dump() for i in items])
-    return BriefingListOut(topic=inp.topic, language=inp.language, items=items)
+        return BriefingListOut(topic=inp.topic, language=inp.language, items=items)
+
+    # Servizio IA giù, quota esaurita o risposta fatta di sole notizie già uscite: la home
+    # mostrava "no items" come se l'argomento non esistesse. Le ultime notizie note, anche
+    # di ieri, restano un contenuto valido; si resta a mani vuote solo se non ne esiste
+    # nessuna. L'argomento va in pausa per qualche minuto, altrimenti ogni apertura della
+    # home rilancerebbe la stessa generazione lenta (un refresh esplicito la salta).
+    _pause_topic(inp.topic, inp.language)
+    stale = await _cached_items(inp.topic, inp.language)
+    if stale:
+        log.info(f"briefing '{inp.topic}': servite {len(stale)} notizie dalla cache storica")
+        return listing(stale)
+    raise HTTPException(
+        status_code=503,
+        detail=("Notizie non disponibili al momento: riprova fra qualche minuto."
+                if inp.language == "it" else
+                "News unavailable right now: please try again in a few minutes."),
+    )
 
 
 @router.post("/news/briefing", response_model=BriefingListOut)
