@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
@@ -22,6 +23,7 @@ FRESH_HOURS = 6          # entro questo tempo la home riusa quanto già generato
 RECENT_WINDOW_HOURS = 48  # finestra entro cui una notizia è considerata "già uscita"
 MIN_CACHED_ITEMS = 2      # sotto questa soglia vale la pena rigenerare
 FAIL_COOLDOWN_SECONDS = 600
+OWN_HISTORY_DAYS = 7      # quanto indietro guardare i titoli già usciti nello stesso argomento
 
 # Quando il servizio IA è giù o a quota esaurita, ogni apertura della home ritentava la
 # generazione e restava in attesa per decine di secondi prima di fallire. Dopo un errore
@@ -53,6 +55,18 @@ async def _recent_headlines(language: str, limit: int = 80) -> List[dict]:
         {"_id": 0, "headline": 1, "topic": 1},
     ).sort("generated_at", -1).to_list(limit)
     return [d for d in docs if d.get("headline")]
+
+
+async def _own_headlines(topic: str, language: str, limit: int = 30) -> List[str]:
+    """Titoli dell'argomento nell'ultima settimana. Senza questi, con molti argomenti la
+    lista delle 48 ore si riempiva di altri temi e il modello riproponeva ogni giorno gli
+    stessi fatti dello stesso argomento."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=OWN_HISTORY_DAYS)).isoformat()
+    docs = await db.briefings.find(
+        {"topic": topic, "language": language, "generated_at": {"$gte": cutoff}},
+        {"_id": 0, "headline": 1},
+    ).sort("generated_at", -1).to_list(limit)
+    return [d["headline"] for d in docs if d.get("headline")]
 
 
 def _scope_for(topic: str, kind: str, language: str) -> str:
@@ -101,7 +115,8 @@ async def generate_briefing(topic: str, language: str, kind: str = "topic", sour
     # Il modello, lasciato solo con l'etichetta dell'argomento, ripropone la notizia più
     # grossa del giorno per ogni argomento vicino. Gli si passa quindi cosa è già uscito.
     recent = await _recent_headlines(language)
-    avoid = [d["headline"] for d in recent][:40]
+    own = await _own_headlines(topic, language)
+    avoid = list(dict.fromkeys(own + [d["headline"] for d in recent]))[:50]
     others = [d["headline"] for d in recent if d.get("topic") != topic]
     listed = "\n".join(f"- {h}" for h in avoid)
 
@@ -183,7 +198,45 @@ Nessun testo fuori dal JSON. Non inventare dati specifici se non ne sei sicuro."
     return items
 
 
-async def run_briefing(inp: BriefingIn) -> BriefingListOut:
+# Generazioni in corso per (argomento, lingua): due richieste sullo stesso argomento
+# (due utenti, doppio click, home + digest) aspettano la stessa chiamata IA invece di
+# lanciarne due.
+_inflight: dict = {}
+
+
+async def _generate_and_store(inp: BriefingIn) -> List[BriefingItem]:
+    try:
+        items = await generate_briefing(inp.topic, inp.language, kind=inp.kind or "topic", source=inp.source)
+    except HTTPException as e:
+        log.warning(f"briefing '{inp.topic}': generazione non riuscita ({e.detail})")
+        items = []
+    except Exception as e:
+        log.error(f"briefing '{inp.topic}': errore inatteso in generazione: {e}")
+        items = []
+    if items:
+        await db.briefings.insert_many([i.model_dump() for i in items])
+    else:
+        # l'argomento va in pausa per qualche minuto, altrimenti ogni apertura della home
+        # rilancerebbe la stessa generazione lenta (un refresh esplicito la salta)
+        _pause_topic(inp.topic, inp.language)
+    return items
+
+
+def _generation(inp: BriefingIn) -> "asyncio.Task":
+    key = (inp.topic, inp.language)
+    task = _inflight.get(key)
+    if task is None or task.done():
+        task = asyncio.create_task(_generate_and_store(inp))
+        _inflight[key] = task
+        task.add_done_callback(lambda t: _inflight.pop(key, None) if _inflight.get(key) is t else None)
+    return task
+
+
+async def run_briefing(inp: BriefingIn, allow_stale: bool = False) -> BriefingListOut:
+    """allow_stale: se le notizie in cache sono vecchie si rispondono subito e il rinnovo
+    parte in background. Per la home: prima ogni click su un argomento non aggiornato da
+    6 ore restava 20-60 secondi sullo scheletro di caricamento. Il digest invece vuole
+    notizie fresche e aspetta."""
     def listing(docs: List[dict]) -> BriefingListOut:
         return BriefingListOut(topic=inp.topic, language=inp.language,
                                items=[BriefingItem(**d) for d in docs[:6]])
@@ -193,31 +246,23 @@ async def run_briefing(inp: BriefingIn) -> BriefingListOut:
         cached = await _cached_items(inp.topic, inp.language, since=cutoff)
         if len(cached) >= MIN_CACHED_ITEMS:
             return listing(cached)
-        # generazione appena fallita: inutile far attendere l'utente per un altro errore
-        if _in_cooldown(inp.topic, inp.language):
+        cooling = _in_cooldown(inp.topic, inp.language)
+        if allow_stale or cooling:
             stale = await _cached_items(inp.topic, inp.language)
             if stale:
+                if not cooling:
+                    _generation(inp)
                 return listing(stale)
 
-    try:
-        items = await generate_briefing(inp.topic, inp.language, kind=inp.kind or "topic", source=inp.source)
-    except HTTPException as e:
-        log.warning(f"briefing '{inp.topic}': generazione non riuscita ({e.detail})")
-        items = []
-    except Exception as e:
-        log.error(f"briefing '{inp.topic}': errore inatteso in generazione: {e}")
-        items = []
-
+    # shield: se il client chiude la connessione la generazione condivisa va avanti
+    items = await asyncio.shield(_generation(inp))
     if items:
-        await db.briefings.insert_many([i.model_dump() for i in items])
         return BriefingListOut(topic=inp.topic, language=inp.language, items=items)
 
     # Servizio IA giù, quota esaurita o risposta fatta di sole notizie già uscite: la home
     # mostrava "no items" come se l'argomento non esistesse. Le ultime notizie note, anche
     # di ieri, restano un contenuto valido; si resta a mani vuote solo se non ne esiste
-    # nessuna. L'argomento va in pausa per qualche minuto, altrimenti ogni apertura della
-    # home rilancerebbe la stessa generazione lenta (un refresh esplicito la salta).
-    _pause_topic(inp.topic, inp.language)
+    # nessuna.
     stale = await _cached_items(inp.topic, inp.language)
     if stale:
         log.info(f"briefing '{inp.topic}': servite {len(stale)} notizie dalla cache storica")
@@ -232,7 +277,7 @@ async def run_briefing(inp: BriefingIn) -> BriefingListOut:
 
 @router.post("/news/briefing", response_model=BriefingListOut)
 async def news_briefing(inp: BriefingIn):
-    return await run_briefing(inp)
+    return await run_briefing(inp, allow_stale=True)
 
 
 @router.get("/news/item/{briefing_id}", response_model=BriefingItem)

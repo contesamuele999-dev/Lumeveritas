@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useLang } from "@/context/LangContext";
 import { api } from "@/lib/api";
@@ -22,6 +22,8 @@ export default function ProfilePage() {
   const [digestFreq, setDigestFreq] = useState("daily");
   const [addingTopic, setAddingTopic] = useState(false);
   const [digestStatus, setDigestStatus] = useState(null);
+  const saveTimer = useRef(null);
+  const [savingTopics, setSavingTopics] = useState(false);
 
   const loadDigestStatus = () =>
     api.get("/digest/status").then(({ data }) => setDigestStatus(data)).catch(() => {});
@@ -30,9 +32,14 @@ export default function ProfilePage() {
     api.get("/topics").then(({ data }) => setTopics(data));
   }, []);
 
+  // solo al cambio di utente: dipendere da `user` intero azzerava le scelte a ogni
+  // aggiornamento del profilo (es. dopo aver aggiunto un argomento personalizzato)
+  useEffect(() => {
+    if (user) setSelected(user.preferred_topics || []);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (user) {
-      setSelected(user.preferred_topics || []);
       api.get("/auth/me/full").then(({ data }) => {
         setDigest(!!data.digest_enabled);
         setDigestFreq(data.digest_frequency || "daily");
@@ -97,18 +104,21 @@ export default function ProfilePage() {
     );
   }
 
+  /* Le scelte si salvano da sole: col pulsante "Salva" in fondo chi toccava gli argomenti
+     e cambiava pagina perdeva tutto, e sembrava che i pulsanti non funzionassero.
+     L'attesa raccoglie più click di fila in un solo salvataggio. */
   const toggle = (key) => {
-    setSelected((s) => s.includes(key) ? s.filter(k => k !== key) : [...s, key]);
-  };
-
-  const save = async () => {
-    setBusy(true);
-    try {
-      await updatePrefs({ preferred_topics: selected, language: lang });
-      toast.success(t(lang, "prefs_saved"));
-    } catch (e) {
-      toast.error(t(lang, "error_generic"));
-    } finally { setBusy(false); }
+    const next = selected.includes(key) ? selected.filter(k => k !== key) : [...selected, key];
+    setSelected(next);
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      setSavingTopics(true);
+      try {
+        await updatePrefs({ preferred_topics: next, language: lang });
+      } catch (e) {
+        toast.error(t(lang, "error_generic"));
+      } finally { setSavingTopics(false); }
+    }, 600);
   };
 
   return (
@@ -153,13 +163,9 @@ export default function ProfilePage() {
             );
           })}
         </div>
-        <button
-          data-testid="save-prefs-btn"
-          onClick={save} disabled={busy}
-          className="mt-6 h-12 px-6 bg-accent text-accent-foreground font-mono-caps flex items-center gap-2"
-        >
-          {busy && <Loader2 className="w-4 h-4 animate-spin" />} {t(lang, "save_prefs")}
-        </button>
+        <div data-testid="save-prefs-status" className="mt-4 h-5 font-mono-caps text-[11px] text-muted-foreground flex items-center gap-2">
+          {savingTopics && <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {t(lang, "loading")}</>}
+        </div>
       </section>
 
       <section>

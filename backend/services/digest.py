@@ -1,6 +1,6 @@
 """Digest builder + sender + scheduled jobs."""
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 from typing import Optional
 from maileroo import MailerooClient, EmailAddress
@@ -14,6 +14,7 @@ from services.digest_rules import DIGEST_HOUR, is_due, rome_tz
 
 TZ = rome_tz()
 MAX_TOPICS_PER_DIGEST = 6
+SENT_MEMORY_DAYS = 7  # titoli già mandati a un utente che non vanno ripetuti
 
 mailer = MailerooClient(MAILEROO_API_KEY) if MAILEROO_API_KEY else None
 
@@ -84,28 +85,44 @@ def _digest_topic_keys(user_doc: dict) -> list:
     return keys[:MAX_TOPICS_PER_DIGEST]
 
 
-async def build_digest_for_user(user_doc: dict, run_briefing_fn) -> Optional[dict]:
+async def _sent_headlines(user_id: str) -> list:
+    """Titoli mandati a questo utente negli ultimi giorni."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=SENT_MEMORY_DAYS)).isoformat()
+    docs = await db.digest_log.find(
+        {"user_id": user_id, "ok": True, "sent_at": {"$gte": cutoff}},
+        {"_id": 0, "headlines": 1},
+    ).to_list(50)
+    return [h for d in docs for h in (d.get("headlines") or [])]
+
+
+async def build_digest_for_user(user_doc: dict, run_briefing_fn, sent_before=()) -> Optional[dict]:
     lang = user_doc.get("language", "it")
     topic_keys = _digest_topic_keys(user_doc)
     all_topics = list(DEFAULT_TOPICS) + list(user_doc.get("custom_topics") or [])
     by_key = {t["key"]: t for t in all_topics}
     sections = []
-    used_headlines: list = []
+    # Argomenti vicini (es. Geopolitica e Guerre) riportavano la stessa notizia in due
+    # sezioni, e giorno dopo giorno tornavano gli stessi fatti riscritti: l'email sembrava
+    # sempre la stessa. Un titolo già usato oggi o già mandato nei giorni scorsi si salta.
+    used_headlines: list = list(sent_before)
     for k in topic_keys:
         topic_meta = by_key.get(k)
         if not topic_meta:
             continue
         label = topic_meta["label_it"] if lang == "it" else topic_meta["label_en"]
         try:
-            res = await run_briefing_fn(BriefingIn(
-                topic=label, language=lang, refresh=False,
-                kind=topic_meta.get("kind") or "topic",
-                source=topic_meta.get("source"),
-            ))
-            # Argomenti vicini (es. Geopolitica e Guerre) riportavano la stessa notizia in
-            # due sezioni: l'email sembrava ripetersi. Un titolo già usato viene saltato e
-            # la sezione prende quello successivo.
+            def request(refresh: bool):
+                return run_briefing_fn(BriefingIn(
+                    topic=label, language=lang, refresh=refresh,
+                    kind=topic_meta.get("kind") or "topic",
+                    source=topic_meta.get("source"),
+                ))
+            res = await request(False)
             keep = drop_duplicates([i.headline for i in res.items], known=used_headlines)
+            if len(keep) < 2:
+                # la cache contiene solo notizie già viste: se ne chiedono di nuove
+                res = await request(True)
+                keep = drop_duplicates([i.headline for i in res.items], known=used_headlines)
             items = [res.items[idx] for idx in keep][:3]
             if items:
                 used_headlines.extend(i.headline for i in items)
@@ -114,13 +131,13 @@ async def build_digest_for_user(user_doc: dict, run_briefing_fn) -> Optional[dic
             log.warning(f"digest section failed {k}: {e}")
     if not sections:
         return None
-    return {"lang": lang, "html": _digest_html(user_doc.get("name") or user_doc["email"].split("@")[0], lang, sections)}
+    return {"lang": lang, "headlines": [it["headline"] for sec in sections for it in sec["items"]], "html": _digest_html(user_doc.get("name") or user_doc["email"].split("@")[0], lang, sections)}
 
 
-async def _log_attempt(user_doc: dict, kind: str, ok: bool, error: Optional[str] = None, ref=None):
+async def _log_attempt(user_doc: dict, kind: str, ok: bool, error: Optional[str] = None, ref=None, headlines=None):
     await db.digest_log.insert_one({
         "user_id": user_doc["id"], "email": user_doc["email"],
-        "kind": kind, "ok": ok, "error": error, "maileroo_ref": ref,
+        "kind": kind, "ok": ok, "error": error, "maileroo_ref": ref, "headlines": headlines or [],
         "day": datetime.now(TZ).date().isoformat(),
         "sent_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -131,7 +148,11 @@ async def send_digest_to_user(user_doc: dict, run_briefing_fn, kind: str = "manu
         log.error("digest: MAILEROO_API_KEY mancante, nessuna email può partire")
         await _log_attempt(user_doc, kind, False, "maileroo_key_missing")
         return False, "maileroo_key_missing"
-    payload = await build_digest_for_user(user_doc, run_briefing_fn)
+    sent = await _sent_headlines(user_doc["id"])
+    payload = await build_digest_for_user(user_doc, run_briefing_fn, sent)
+    if not payload and sent:
+        # tutto già visto anche dopo il rinnovo: meglio qualche ripetizione che nessuna email
+        payload = await build_digest_for_user(user_doc, run_briefing_fn)
     if not payload:
         await _log_attempt(user_doc, kind, False, "no_content")
         return False, "no_content"
@@ -148,7 +169,7 @@ async def send_digest_to_user(user_doc: dict, run_briefing_fn, kind: str = "manu
     }
     try:
         ref = await asyncio.to_thread(mailer.send_basic_email, params)
-        await _log_attempt(user_doc, kind, True, ref=ref)
+        await _log_attempt(user_doc, kind, True, ref=ref, headlines=payload["headlines"])
         return True, None
     except Exception as e:
         msg = str(e)
