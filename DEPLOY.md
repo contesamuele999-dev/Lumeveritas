@@ -82,10 +82,18 @@ job in background**.
 Il digest non usa più un cron alle 06:00 in punto (che con l'istanza addormentata
 saltava la giornata in silenzio): un job controlla ogni 10 minuti chi non ha ancora
 ricevuto il digest di oggi e lo manda al primo risveglio dopo le 06:00 Europe/Rome.
-Il ping resta comunque consigliato per averlo puntuale.
+Per tenerlo sveglio ci sono due meccanismi, nessuno da configurare su Render:
 
-Fix gratis: https://uptimerobot.com → Add New Monitor → HTTP(s) →
-URL `https://lume-veritas-api.onrender.com/api/` → intervallo 5 minuti.
+- **Auto-ping**: ogni 10 minuti il backend chiama il proprio URL pubblico
+  (`RENDER_EXTERNAL_URL`, impostata da Render da sola). Finché è vivo non si addormenta.
+- **GitHub Actions** (`.github/workflows/keepalive.yml`): ogni 10 minuti lo sveglia da fuori,
+  utile dopo un riavvio di Render. Va impostato una volta l'URL del backend:
+  GitHub → repo → Settings → Secrets and variables → Actions → Variables →
+  `BACKEND_URL` = `https://<tuo-backend>.onrender.com` (senza `/` finale).
+  GitHub sospende i workflow programmati dopo 60 giorni senza commit: in quel caso
+  riattivalo da Actions → keepalive → Enable.
+
+Le ore istanza gratuite di Render (750/mese) bastano per un servizio sempre acceso.
 
 Per capire perché un digest non è arrivato: `GET /api/digest/status` (autenticato) oppure
 la sezione "Stato invii" nel Profilo — riporta ultimo invio riuscito, ultimo errore e

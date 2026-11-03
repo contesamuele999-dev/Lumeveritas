@@ -25,4 +25,6 @@ if '<' in _sender:
 else:
     SENDER_NAME, SENDER_EMAIL = os.environ.get('SENDER_NAME', 'Lume Veritas'), _sender
 PUBLIC_APP_URL = os.environ.get('PUBLIC_APP_URL', '')
+# Impostata da Render in automatico: l'URL pubblico di questo servizio, usato per l'auto-ping.
+RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL', '')
 CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')

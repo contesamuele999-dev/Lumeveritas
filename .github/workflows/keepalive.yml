@@ -1,0 +1,16 @@
+# Sveglia il backend su Render free da fuori. Il backend si auto-pinga quando è vivo;
+# questo serve se Render lo riavvia o lo addormenta comunque, e garantisce il digest
+# dopo le 06:00 anche senza visite. URL in Settings → Variables → BACKEND_URL.
+name: keepalive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: vars.BACKEND_URL != ''
+    steps:
+      - run: curl -fsS --retry 3 --retry-delay 20 --max-time 90 "${{ vars.BACKEND_URL }}/api/"
