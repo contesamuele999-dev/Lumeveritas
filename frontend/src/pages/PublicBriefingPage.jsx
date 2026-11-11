@@ -8,6 +8,8 @@ import ClickableText from "@/components/ClickableText";
 import SourceLinks from "@/components/SourceLinks";
 import AudioButton from "@/components/AudioButton";
 import ShareButton from "@/components/ShareButton";
+import DeepDiveButtons from "@/components/DeepDiveButtons";
+import DeepDiveSheet from "@/components/DeepDiveSheet";
 import { Loader2, ArrowLeft, Landmark, BarChart3, BookOpen, ScrollText, Eye } from "lucide-react";
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL;
@@ -18,6 +20,8 @@ export default function PublicBriefingPage() {
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [openDeep, setOpenDeep] = useState(false);
+  const [initialTab, setInitialTab] = useState("deep");
 
   useEffect(() => {
     let alive = true;
@@ -122,7 +126,8 @@ export default function PublicBriefingPage() {
           <div className="text-lg md:text-xl text-foreground/85 leading-relaxed">
             <ClickableText text={item.summary} />
           </div>
-          <div className="flex flex-wrap gap-3 pt-4">
+          <div className="flex flex-wrap gap-2 md:gap-3 pt-4">
+            <DeepDiveButtons id={item.id} onOpen={(tab) => { setInitialTab(tab); setOpenDeep(true); }} />
             <AudioButton item={item} testid={`public-audio-${item.id}`} />
             <ShareButton briefingId={item.id} testid={`public-share-${item.id}`} />
           </div>
@@ -176,6 +181,8 @@ export default function PublicBriefingPage() {
         )}
 
         <SourceLinks sources={item.sources} />
+
+        <DeepDiveSheet item={item} open={openDeep} onOpenChange={setOpenDeep} initialTab={initialTab} />
 
         <footer className="border-t border-border pt-8">
           <Link to="/" className="font-mono-caps text-accent link-underline">

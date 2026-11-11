@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useLang } from "@/context/LangContext";
 import { t } from "@/lib/i18n";
-import { Bookmark, BookmarkCheck, Sparkles, Users, ShieldCheck, History } from "lucide-react";
+import { Bookmark, BookmarkCheck } from "lucide-react";
+import DeepDiveButtons from "@/components/DeepDiveButtons";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -87,34 +88,7 @@ export default function NewsItem({ item, featured = false, onSaveToggle, initial
       <SourceLinks sources={item.sources} compact />
 
       <div className="mt-4 md:mt-6 flex flex-wrap items-center gap-2 md:gap-3">
-        <button
-          data-testid={`approfondisci-btn-${item.id}`}
-          onClick={() => { setInitialTab("deep"); setOpenDeep(true); }}
-          className="h-10 md:h-12 px-3 md:px-5 bg-accent text-accent-foreground hover:opacity-90 transition-opacity font-mono-caps flex items-center gap-2"
-        >
-          <Sparkles className="w-4 h-4" /> {t(lang, "approfondisci")}
-        </button>
-        <button
-          data-testid={`debate-btn-${item.id}`}
-          onClick={() => { setInitialTab("debate"); setOpenDeep(true); }}
-          className="h-10 md:h-12 px-3 md:px-5 border border-foreground bg-background hover:bg-foreground hover:text-background transition-colors font-mono-caps flex items-center gap-2"
-        >
-          <Users className="w-4 h-4" /> {t(lang, "debate_btn")}
-        </button>
-        <button
-          data-testid={`history-btn-${item.id}`}
-          onClick={() => { setInitialTab("history"); setOpenDeep(true); }}
-          className="h-10 md:h-12 px-3 md:px-5 border border-foreground bg-background hover:bg-foreground hover:text-background transition-colors font-mono-caps flex items-center gap-2"
-        >
-          <History className="w-4 h-4" /> {t(lang, "tab_history")}
-        </button>
-        <button
-          data-testid={`verify-btn-${item.id}`}
-          onClick={() => { setInitialTab("verify"); setOpenDeep(true); }}
-          className="h-10 md:h-12 px-3 md:px-5 border border-foreground bg-background hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors font-mono-caps flex items-center gap-2"
-        >
-          <ShieldCheck className="w-4 h-4" /> {t(lang, "verify_btn")}
-        </button>
+        <DeepDiveButtons id={item.id} onOpen={(tab) => { setInitialTab(tab); setOpenDeep(true); }} />
         <button
           data-testid={`save-btn-${item.id}`}
           onClick={toggleSave}
