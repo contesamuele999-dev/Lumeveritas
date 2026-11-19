@@ -54,6 +54,7 @@ async def me_full(user=Depends(require_user)):
         "language": user.get("language", "it"),
         "digest_enabled": bool(user.get("digest_enabled", False)),
         "digest_frequency": user.get("digest_frequency", "daily"),
+        "digest_rotate": bool(user.get("digest_rotate", False)),
         "custom_topics": user.get("custom_topics", []),
     }
 

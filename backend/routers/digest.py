@@ -16,13 +16,16 @@ async def digest_prefs(inp: DigestPrefIn, user=Depends(require_user)):
         updates["digest_enabled"] = inp.enabled
     if inp.frequency is not None:
         updates["digest_frequency"] = inp.frequency
+    if inp.rotate is not None:
+        updates["digest_rotate"] = inp.rotate
     if updates:
         await db.users.update_one({"id": user["id"]}, {"$set": updates})
-    doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "digest_enabled": 1, "digest_frequency": 1})
+    doc = await db.users.find_one({"id": user["id"]}, {"_id": 0, "digest_enabled": 1, "digest_frequency": 1, "digest_rotate": 1})
     return {
         "ok": True,
         "digest_enabled": bool((doc or {}).get("digest_enabled", False)),
         "digest_frequency": (doc or {}).get("digest_frequency", "daily"),
+        "digest_rotate": bool((doc or {}).get("digest_rotate", False)),
     }
 
 
@@ -35,6 +38,7 @@ async def digest_status(user=Depends(require_user)):
     return {
         "enabled": bool(user.get("digest_enabled", False)),
         "frequency": user.get("digest_frequency", "daily"),
+        "rotate": bool(user.get("digest_rotate", False)),
         "hour": DIGEST_HOUR,
         "mailer_configured": mailer is not None,
         "topics": _digest_topic_keys(user),

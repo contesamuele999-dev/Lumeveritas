@@ -10,7 +10,7 @@ from db import db
 from log import log
 from models import BriefingIn, DEFAULT_TOPICS
 from services.dedup import drop_duplicates
-from services.digest_rules import DIGEST_HOUR, is_due, rome_tz
+from services.digest_rules import DIGEST_HOUR, is_due, rome_tz, rotate_topics, rotation_period
 
 TZ = rome_tz()
 MAX_TOPICS_PER_DIGEST = 6
@@ -75,13 +75,17 @@ def _digest_html(user_name: str, lang: str, sections: list) -> str:
 </body></html>"""
 
 
-def _digest_topic_keys(user_doc: dict) -> list:
+def _digest_topic_keys(user_doc: dict, today: Optional[date] = None) -> list:
     """Argomenti del digest: prima TUTTI i personalizzati dell'utente, poi i preferiti
     standard. I custom sono il motivo per cui uno si iscrive: non devono mai cadere fuori
-    dal taglio."""
+    dal taglio. Con la rotazione attiva ogni email ne copre solo alcuni, a turno su tutta
+    la lista (senza il taglio fisso)."""
     custom_keys = [t["key"] for t in (user_doc.get("custom_topics") or [])]
     preferred = user_doc.get("preferred_topics") or [t["key"] for t in DEFAULT_TOPICS[:4]]
     keys = custom_keys + [k for k in preferred if k not in custom_keys]
+    if user_doc.get("digest_rotate"):
+        day = today or datetime.now(TZ).date()
+        return rotate_topics(keys, rotation_period(day, user_doc.get("digest_frequency", "daily")))
     return keys[:MAX_TOPICS_PER_DIGEST]
 
 

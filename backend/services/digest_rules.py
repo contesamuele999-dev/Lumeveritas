@@ -31,3 +31,20 @@ def is_due(now: datetime, frequency: str, last_ok_day: Optional[date], attempts_
     if attempts_today >= MAX_ATTEMPTS_PER_DAY:
         return False
     return True
+
+
+ROTATE_TOPICS_PER_DIGEST = 3  # con la rotazione attiva: argomenti per singola email
+
+
+def rotation_period(day: date, frequency: str) -> int:
+    """Indice del turno di rotazione: avanza di uno a ogni giorno (o settimana) di invio."""
+    return day.toordinal() // 7 if frequency == "weekly" else day.toordinal()
+
+
+def rotate_topics(keys: list, period: int, size: int = ROTATE_TOPICS_PER_DIGEST) -> list:
+    """Finestra di `size` argomenti che scorre su tutta la lista, un turno dopo l'altro.
+    Ogni argomento torna a rotazione, anche quelli oltre il limite fisso del digest."""
+    if len(keys) <= size:
+        return list(keys)
+    start = (period * size) % len(keys)
+    return [keys[(start + i) % len(keys)] for i in range(size)]

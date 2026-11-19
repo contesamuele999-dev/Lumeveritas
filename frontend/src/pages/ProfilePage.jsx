@@ -20,6 +20,7 @@ export default function ProfilePage() {
   const [newTopicKind, setNewTopicKind] = useState("topic");
   const [newTopicSource, setNewTopicSource] = useState("");
   const [digestFreq, setDigestFreq] = useState("daily");
+  const [digestRotate, setDigestRotate] = useState(false);
   const [addingTopic, setAddingTopic] = useState(false);
   const [digestStatus, setDigestStatus] = useState(null);
   const saveTimer = useRef(null);
@@ -43,6 +44,7 @@ export default function ProfilePage() {
       api.get("/auth/me/full").then(({ data }) => {
         setDigest(!!data.digest_enabled);
         setDigestFreq(data.digest_frequency || "daily");
+        setDigestRotate(!!data.digest_rotate);
       }).catch(() => {});
       loadDigestStatus();
     }
@@ -66,6 +68,18 @@ export default function ProfilePage() {
     try {
       await api.put("/digest/preferences", { frequency: freq });
       setDigestFreq(freq);
+      toast.success(t(lang, "prefs_saved"));
+    } catch (e) {
+      toast.error(t(lang, "error_generic"));
+    } finally { setBusy(false); }
+  };
+
+  const changeRotate = async (rotate) => {
+    setBusy(true);
+    try {
+      await api.put("/digest/preferences", { rotate });
+      setDigestRotate(rotate);
+      loadDigestStatus();
       toast.success(t(lang, "prefs_saved"));
     } catch (e) {
       toast.error(t(lang, "error_generic"));
@@ -310,6 +324,28 @@ export default function ProfilePage() {
             ))}
           </div>
         </div>
+        <div className="mb-5">
+          <div className="font-mono-caps text-muted-foreground text-[11px] mb-2">{t(lang, "digest_rotate_label")}</div>
+          <div className="flex gap-2" data-testid="digest-rotate-picker">
+            {[
+              { k: false, label: t(lang, "digest_rotate_off") },
+              { k: true, label: t(lang, "digest_rotate_on") },
+            ].map((opt) => (
+              <button
+                key={String(opt.k)}
+                data-testid={`digest-rotate-${opt.k ? "on" : "off"}`}
+                onClick={() => changeRotate(opt.k)}
+                disabled={busy}
+                className={`h-11 px-4 border font-mono-caps text-xs ${
+                  digestRotate === opt.k ? "bg-foreground text-background border-foreground" : "border-border hover:border-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-muted-foreground mt-2 max-w-2xl">{t(lang, "digest_rotate_desc")}</p>
+        </div>
         <div className="flex flex-wrap gap-3">
           <button
             data-testid="digest-toggle-btn"
@@ -361,7 +397,9 @@ export default function ProfilePage() {
             )}
             {digestStatus.topics?.length > 0 && (
               <div className="text-muted-foreground">
-                {lang === "it" ? "Argomenti inclusi: " : "Topics included: "}{digestStatus.topics.length}
+                {digestStatus.rotate
+                  ? (lang === "it" ? "Argomenti nel prossimo invio: " : "Topics in next send: ")
+                  : (lang === "it" ? "Argomenti inclusi: " : "Topics included: ")}{digestStatus.topics.length}
               </div>
             )}
           </div>

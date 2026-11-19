@@ -174,6 +174,7 @@ class CustomTopic(BaseModel):
 class DigestPrefIn(BaseModel):
     enabled: Optional[bool] = None
     frequency: Optional[Literal["daily", "weekly"]] = None
+    rotate: Optional[bool] = None
 
 class TTSIn(BaseModel):
     text: Optional[str] = None
